@@ -1,0 +1,12 @@
+{
+  "name": "openclaw-data",
+  "version": "1.0.0",
+  "description": "OpenClaw persistent data storage using Convex",
+  "scripts": {
+    "dev": "convex dev",
+    "deploy": "convex deploy"
+  },
+  "dependencies": {
+    "convex": "^1.0.0"
+  }
+}
