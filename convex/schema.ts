@@ -262,20 +262,33 @@ export default defineSchema({
   // AGENTS (Multi-agent support)
   // ============================================
   agents: defineTable({
-    agentId: v.string(), // Unique agent identifier
+    agentId: v.string(), // Unique agent identifier: main, si-coder, si-db, si-it, si-pinter, si-pm
     name: v.string(),
     type: v.string(), // "main", "sub", "worker", "specialized"
     model: v.optional(v.string()),
-    status: v.string(), // "active", "paused", "offline"
+    status: v.optional(v.string()), // "active", "paused", "offline" (legacy)
+    isActive: v.optional(v.string()), // "active", "disable", "backup"
     capabilities: v.optional(v.array(v.string())),
     config: v.optional(v.any()),
     owner: v.optional(v.id("userProfiles")),
+
+    // Agent personality files
+    soulMd: v.optional(v.string()), // SOUL.md - Who the agent is
+    identityMd: v.optional(v.string()), // IDENTITY.md - Name, emoji, avatar
+    agentsMd: v.optional(v.string()), // AGENTS.md - Operational instructions
+    toolsMd: v.optional(v.string()), // TOOLS.md - Technical notes
+    userMd: v.optional(v.string()), // USER.md - About the human they help
+    heartbeatMd: v.optional(v.string()), // HEARTBEAT.md - Periodic tasks
+    bootstrapMd: v.optional(v.string()), // BOOTSTRAP.md - First-time setup
+    memoryMd: v.optional(v.string()), // MEMORY.md - Long-term memory
+
     createdAt: v.number(),
     updatedAt: v.number(),
     lastActiveAt: v.optional(v.number()),
   }).index("by_agentId", ["agentId"])
     .index("by_owner", ["owner"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_isActive", ["isActive"]),
 
   // ============================================
   // AGENT SESSIONS (Detailed session tracking)
