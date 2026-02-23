@@ -944,6 +944,9 @@ export const getSeedStatus = internalMutation({
     const tasks = await ctx.db.query("heartbeatTasks").collect();
     const workspaceFiles = await ctx.db.query("workspaceFiles").collect();
     const workspaceTrees = await ctx.db.query("workspaceTrees").collect();
+    const agentIdentity = await ctx.db.query("agentIdentity").collect();
+    const toolsConfig = await ctx.db.query("toolsConfig").collect();
+    const agentOperations = await ctx.db.query("agentOperations").collect();
     
     return {
       roles: roles.length,
@@ -953,7 +956,107 @@ export const getSeedStatus = internalMutation({
       heartbeatTasks: tasks.length,
       workspaceFiles: workspaceFiles.length,
       workspaceTrees: workspaceTrees.length,
+      agentIdentity: agentIdentity.length,
+      toolsConfig: toolsConfig.length,
+      agentOperations: agentOperations.length,
       isSeeded: roles.length > 0 && users.length > 0,
     };
+  },
+});
+
+// Seed agent identity, tools config, and operations
+export const seedAgentConfig = internalMutation({
+  handler: async (ctx) => {
+    const now = Date.now();
+    const results: any = {};
+
+    // 1. Seed agentIdentity
+    const existingIdentity = await ctx.db
+      .query("agentIdentity")
+      .withIndex("by_agentId", (q) => q.eq("agentId", "main"))
+      .first();
+
+    if (!existingIdentity) {
+      await ctx.db.insert("agentIdentity", {
+        agentId: "main",
+        name: "OpenClaw",
+        creature: "AI Assistant",
+        vibe: "Sharp, helpful, casual",
+        emoji: "🦀",
+        avatar: "/avatars/openclaw.png",
+        soulContent: TEMPLATE_CONTENTS["SOUL.md"] || "",
+        identityContent: TEMPLATE_CONTENTS["IDENTITY.md"] || "",
+        version: 1,
+        updatedAt: now,
+      });
+      results.agentIdentity = { created: "main" };
+    } else {
+      // Update with latest content
+      await ctx.db.patch(existingIdentity._id, {
+        soulContent: CURRENT_CONTENTS["SOUL.md"] || existingIdentity.soulContent,
+        identityContent: CURRENT_CONTENTS["IDENTITY.md"] || existingIdentity.identityContent,
+        version: existingIdentity.version + 1,
+        updatedAt: now,
+      });
+      results.agentIdentity = { updated: "main" };
+    }
+
+    // 2. Seed toolsConfig
+    const existingTools = await ctx.db
+      .query("toolsConfig")
+      .withIndex("by_agentId", (q) => q.eq("agentId", "main"))
+      .first();
+
+    if (!existingTools) {
+      await ctx.db.insert("toolsConfig", {
+        agentId: "main",
+        toolsContent: CURRENT_CONTENTS["TOOLS.md"] || TEMPLATE_CONTENTS["TOOLS.md"] || "",
+        voicePreferences: {
+          preferredVoice: "Nova",
+          defaultSpeaker: "Default",
+        },
+        version: 1,
+        updatedAt: now,
+      });
+      results.toolsConfig = { created: "main" };
+    } else {
+      await ctx.db.patch(existingTools._id, {
+        toolsContent: CURRENT_CONTENTS["TOOLS.md"] || existingTools.toolsContent,
+        version: existingTools.version + 1,
+        updatedAt: now,
+      });
+      results.toolsConfig = { updated: "main" };
+    }
+
+    // 3. Seed agentOperations
+    const existingOps = await ctx.db
+      .query("agentOperations")
+      .withIndex("by_agentId", (q) => q.eq("agentId", "main"))
+      .first();
+
+    if (!existingOps) {
+      await ctx.db.insert("agentOperations", {
+        agentId: "main",
+        operationsContent: CURRENT_CONTENTS["AGENTS.md"] || TEMPLATE_CONTENTS["AGENTS.md"] || "",
+        rules: [
+          { category: "memory", rule: "Read SOUL.md, USER.md, MEMORY.md every session" },
+          { category: "safety", rule: "Ask before external actions (emails, posts)" },
+          { category: "group", rule: "Don't respond to every message in group chats" },
+          { category: "formatting", rule: "No markdown tables on Discord/WhatsApp" },
+        ],
+        version: 1,
+        updatedAt: now,
+      });
+      results.agentOperations = { created: "main" };
+    } else {
+      await ctx.db.patch(existingOps._id, {
+        operationsContent: CURRENT_CONTENTS["AGENTS.md"] || existingOps.operationsContent,
+        version: existingOps.version + 1,
+        updatedAt: now,
+      });
+      results.agentOperations = { updated: "main" };
+    }
+
+    return results;
   },
 });
