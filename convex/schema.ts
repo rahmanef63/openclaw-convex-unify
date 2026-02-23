@@ -113,7 +113,8 @@ export default defineSchema({
     lastActiveAt: v.number(),
     metadata: v.optional(v.any()),
   }).index("by_sessionKey", ["sessionKey"])
-    .index("by_channel", ["channel"]),
+    .index("by_channel", ["channel"])
+    .index("by_user", ["userId"]),
 
   // ============================================
   // MESSAGES (Chat history)
@@ -163,6 +164,44 @@ export default defineSchema({
     deployedAt: v.optional(v.number()),
   }).index("by_slug", ["slug"])
     .index("by_status", ["status"]),
+
+  // ============================================
+  // PROJECT DEFAULTS (Global setup rules)
+  // ============================================
+  projectDefaults: defineTable({
+    scope: v.string(), // "global"
+    basePath: v.string(), // e.g. /home/rahman/projects
+    projectRootPattern: v.string(), // e.g. /home/rahman/projects/{project-name}
+    structure: v.object({
+      frontendDir: v.string(), // "frontend"
+      backendDir: v.string(), // "backend"
+    }),
+    frontend: v.object({
+      framework: v.string(), // "nextjs"
+      architecture: v.optional(v.string()), // "slices"
+      rootFolders: v.optional(v.array(v.string())), // ["shared", "features"]
+    }),
+    backend: v.object({
+      framework: v.string(), // "convex"
+      database: v.string(), // "convex-self-hosted"
+      convexProjectPolicy: v.string(), // "separate-per-project"
+      schemaPolicy: v.string(), // "do-not-share-with-main-agent"
+    }),
+    deploy: v.object({
+      primary: v.string(), // "dokploy"
+      mustUseContainer: v.optional(v.boolean()),
+      secondary: v.optional(v.string()), // "vercel"
+      notes: v.optional(v.string()),
+    }),
+    db: v.object({
+      mode: v.string(), // "convex-self-hosted"
+      url: v.optional(v.string()),
+      mvpStorage: v.string(), // "browser-localStorage"
+      mvpRule: v.string(), // when to use local storage
+    }),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_scope", ["scope"]),
 
   // ============================================
   // DAILY NOTES (Daily memory files)
@@ -326,7 +365,8 @@ export default defineSchema({
     .index("by_owner", ["ownerId"])
     .index("by_category", ["category"])
     .index("by_agent", ["agentId"])
-    .index("by_owner_category", ["ownerId", "category"]),
+    .index("by_owner_category", ["ownerId", "category"])
+    .index("by_isTemplate", ["isTemplate"]),
 
   // ============================================
   // WORKSPACE TREES (Track workspace structure)

@@ -30,7 +30,7 @@ export const create = mutation({
         lastActiveAt: Date.now(),
         status: "active",
       });
-      return existing;
+      return await ctx.db.get(existing._id);
     }
     
     const now = Date.now();
@@ -61,7 +61,7 @@ export const getByUser = query({
   handler: async (ctx, args) => {
     return await ctx.db
       .query("sessions")
-      .filter((q) => q.eq(q.field("userId"), args.userId))
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .order("desc")
       .take(50);
   },
@@ -92,6 +92,7 @@ export const touch = mutation({
       await ctx.db.patch(session._id, {
         lastActiveAt: Date.now(),
       });
+      return await ctx.db.get(session._id);
     }
     return session;
   },
@@ -111,6 +112,7 @@ export const updateStatus = mutation({
     
     if (session) {
       await ctx.db.patch(session._id, { status: args.status });
+      return await ctx.db.get(session._id);
     }
     return session;
   },
@@ -127,6 +129,7 @@ export const end = mutation({
     
     if (session) {
       await ctx.db.patch(session._id, { status: "ended" });
+      return await ctx.db.get(session._id);
     }
     return session;
   },

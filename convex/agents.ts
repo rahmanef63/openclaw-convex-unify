@@ -67,12 +67,16 @@ export const getAllAgents = query({
   handler: async (ctx, args) => {
     let query = ctx.db.query("agents");
     
-    if (args.status) {
-      query = query.withIndex("by_status", (q) => q.eq("status", args.status!));
-    } else if (args.owner) {
+    if (args.owner) {
       query = query.withIndex("by_owner", (q) => q.eq("owner", args.owner!));
+    } else if (args.status) {
+      query = query.withIndex("by_status", (q) => q.eq("status", args.status!));
     }
-    
+
+    if (args.status && args.owner) {
+      query = query.filter((q) => q.eq(q.field("status"), args.status!));
+    }
+
     return await query.collect();
   },
 });
@@ -94,6 +98,7 @@ export const updateStatus = mutation({
         status: args.status,
         updatedAt: Date.now(),
       });
+      return await ctx.db.get(agent._id);
     }
     
     return agent;
@@ -131,6 +136,7 @@ export const startSession = mutation({
           endedAt: undefined,
           messageCount: 0,
         });
+        return await ctx.db.get(existing._id);
       }
       return existing;
     }
@@ -168,6 +174,7 @@ export const endSession = mutation({
         endedAt: Date.now(),
         tokenUsage: args.tokenUsage,
       });
+      return await ctx.db.get(session._id);
     }
     
     return session;
@@ -187,6 +194,7 @@ export const incrementMessageCount = mutation({
       await ctx.db.patch(session._id, {
         messageCount: (session.messageCount || 0) + 1,
       });
+      return await ctx.db.get(session._id);
     }
     
     return session;
@@ -229,6 +237,10 @@ export const getSessionHistory = query({
       query = query.withIndex("by_agent", (q) => q.eq("agentId", args.agentId!));
     } else if (args.userId) {
       query = query.withIndex("by_user", (q) => q.eq("userId", args.userId!));
+    }
+
+    if (args.agentId && args.userId) {
+      query = query.filter((q) => q.eq(q.field("userId"), args.userId!));
     }
     
     return await query

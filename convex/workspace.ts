@@ -3,6 +3,38 @@
 import { mutation, query, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 
+async function findWorkspaceForPath(ctx: { db: any }, path: string) {
+  const trees = await ctx.db.query("workspaceTrees").collect();
+  let best = null;
+  let bestLen = -1;
+
+  for (const tree of trees) {
+    const root = tree.rootPath || "";
+    const matches =
+      root === "" || path === root || path.startsWith(root + "/");
+    if (matches && root.length > bestLen) {
+      best = tree;
+      bestLen = root.length;
+    }
+  }
+
+  return best;
+}
+
+async function updateWorkspaceFileCount(
+  ctx: { db: any },
+  path: string,
+  delta: number
+) {
+  const workspace = await findWorkspaceForPath(ctx, path);
+  if (!workspace) return;
+  const nextCount = Math.max(0, (workspace.fileCount || 0) + delta);
+  await ctx.db.patch(workspace._id, {
+    fileCount: nextCount,
+    updatedAt: Date.now(),
+  });
+}
+
 // ============================================
 // FILE OPERATIONS
 // ============================================
@@ -71,7 +103,7 @@ export const saveFile = mutation({
         createdAt: now,
         updatedAt: now,
       });
-      
+      await updateWorkspaceFileCount(ctx, args.path, 1);
       return await ctx.db.get(id);
     }
   },
@@ -154,6 +186,7 @@ export const deleteFile = mutation({
       }
       
       await ctx.db.delete(file._id);
+      await updateWorkspaceFileCount(ctx, file.path, -1);
       return true;
     }
     
@@ -327,7 +360,7 @@ export const getTemplates = query({
   handler: async (ctx) => {
     return await ctx.db
       .query("workspaceFiles")
-      .filter((q) => q.eq(q.field("isTemplate"), true))
+      .withIndex("by_isTemplate", (q) => q.eq("isTemplate", true))
       .collect();
   },
 });
@@ -374,7 +407,7 @@ export const cloneTemplate = mutation({
       createdAt: now,
       updatedAt: now,
     });
-    
+    await updateWorkspaceFileCount(ctx, args.newPath, 1);
     return await ctx.db.get(id);
   },
 });

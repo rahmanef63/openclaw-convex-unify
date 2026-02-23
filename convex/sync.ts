@@ -1,6 +1,7 @@
 // Sync Functions - Sync local workspace files to Convex
 
 import { internalMutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
 // Daily notes from memory folder
@@ -75,6 +76,40 @@ const DAILY_NOTES = [
   },
 ];
 
+const PROJECT_DEFAULTS = {
+  scope: "global",
+  basePath: "/home/rahman/projects",
+  projectRootPattern: "/home/rahman/projects/{project-name}",
+  structure: {
+    frontendDir: "frontend",
+    backendDir: "backend",
+  },
+  frontend: {
+    framework: "nextjs",
+    architecture: "slices",
+    rootFolders: ["shared", "features"],
+  },
+  backend: {
+    framework: "convex",
+    database: "convex-self-hosted",
+    convexProjectPolicy: "separate-per-project",
+    schemaPolicy: "do-not-share-with-main-agent",
+  },
+  deploy: {
+    primary: "dokploy",
+    mustUseContainer: true,
+    secondary: "vercel",
+    notes:
+      "Deploy from within Dokploy container/network. Use Vercel for PRD or small projects without a domain.",
+  },
+  db: {
+    mode: "convex-self-hosted",
+    url: "https://api.rahmanef.com",
+    mvpStorage: "browser-localStorage",
+    mvpRule: "If project is MVP or small, use browser localStorage cache instead of DB.",
+  },
+};
+
 // Sync daily notes
 export const syncDailyNotes = internalMutation({
   handler: async (ctx) => {
@@ -106,6 +141,33 @@ export const syncDailyNotes = internalMutation({
     }
     
     return { synced: results };
+  },
+});
+
+// Sync global project defaults
+export const syncProjectDefaults = internalMutation({
+  handler: async (ctx) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("projectDefaults")
+      .withIndex("by_scope", (q) => q.eq("scope", "global"))
+      .first();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        ...PROJECT_DEFAULTS,
+        updatedAt: now,
+      });
+      return { updated: true };
+    }
+
+    await ctx.db.insert("projectDefaults", {
+      ...PROJECT_DEFAULTS,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return { created: true };
   },
 });
 
@@ -242,104 +304,134 @@ _(Any other important information)_
 export const createAllUserWorkspaces = internalMutation({
   handler: async (ctx) => {
     const users = await ctx.db.query("userProfiles").collect();
+    const now = Date.now();
     const results: any[] = [];
     
     for (const user of users) {
-      if (user.phone) {
-        // Derive username from phone or name
-        const username = user.name?.toLowerCase().replace(/\s+/g, "-") || 
-                        user.phone.replace("+", "");
-        
-        const result = await ctx.runMutation(
-          { path: "sync:createUserWorkspace" } as any,
-          {
-            userId: user._id,
-            username,
-            phone: user.phone,
-            email: user.email,
-          }
-        );
-        
-        results.push({ phone: user.phone, username, ...result });
+      if (!user.phone) continue;
+      
+      // Derive username from phone or name
+      const username = user.name?.toLowerCase().replace(/\s+/g, "-") || 
+                      user.phone.replace("+", "");
+      
+      // Create user workspace tree
+      const existingTree = await ctx.db
+        .query("workspaceTrees")
+        .withIndex("by_rootPath", (q) => q.eq("rootPath", `user/${username}`))
+        .first();
+      
+      let workspaceResult = "exists";
+      if (!existingTree) {
+        await ctx.db.insert("workspaceTrees", {
+          rootPath: `user/${username}`,
+          name: `${username}'s Workspace`,
+          type: "user",
+          ownerId: user._id,
+          description: `Personal workspace for ${username}`,
+          fileCount: 2,
+          status: "active",
+          createdAt: now,
+          updatedAt: now,
+        });
+        workspaceResult = "created";
       }
+      
+      // Create USER.md for this user
+      const userMdPath = `user/${username}/USER.md`;
+      const existingUserMd = await ctx.db
+        .query("workspaceFiles")
+        .withIndex("by_path", (q) => q.eq("path", userMdPath))
+        .first();
+      
+      let userMdResult = "exists";
+      if (!existingUserMd) {
+        const userMdContent = `# USER.md - About ${user.name || username}
+
+_Learn about this person. Update as you go._
+
+- **Name:** ${user.name || "N/A"}
+- **Phone:** ${user.phone}
+- **Email:** ${user.email || "N/A"}
+- **Timezone:** ${user.timezone || "N/A"}
+
+## Context
+
+_(What do they care about? Build this over time.)_
+
+---
+
+The more you know, the better you can help.
+`;
+        await ctx.db.insert("workspaceFiles", {
+          path: userMdPath,
+          fileType: "md",
+          category: "user",
+          ownerId: user._id,
+          content: userMdContent,
+          version: 1,
+          syncStatus: "synced",
+          lastSyncedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+        userMdResult = "created";
+      }
+      
+      // Create MEMORY.md for this user
+      const memoryMdPath = `user/${username}/MEMORY.md`;
+      const existingMemoryMd = await ctx.db
+        .query("workspaceFiles")
+        .withIndex("by_path", (q) => q.eq("path", memoryMdPath))
+        .first();
+      
+      let memoryMdResult = "exists";
+      if (!existingMemoryMd) {
+        const memoryMdContent = `# Long-Term Memory - ${user.name || username}
+
+## Personal Info
+
+_(Add important details about this user as you learn them)_
+
+## Preferences
+
+_(What do they like? Dislike?)_
+
+## Important Dates
+
+_(Birthdays, anniversaries, etc.)_
+
+## Notes
+
+_(Any other important information)_
+
+---
+*Last updated: ${new Date(now).toISOString().split('T')[0]}*
+`;
+        await ctx.db.insert("workspaceFiles", {
+          path: memoryMdPath,
+          fileType: "md",
+          category: "memory",
+          ownerId: user._id,
+          content: memoryMdContent,
+          version: 1,
+          syncStatus: "synced",
+          lastSyncedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+        memoryMdResult = "created";
+      }
+      
+      results.push({
+        phone: user.phone,
+        username,
+        workspace: workspaceResult,
+        userMd: userMdResult,
+        memoryMd: memoryMdResult,
+      });
     }
     
     return results;
-  },
-});
-
-// Create projects entries
-export const syncProjects = internalMutation({
-  handler: async (ctx) => {
-    const now = Date.now();
-    const projects = [
-      {
-        name: "OpenClaw RPG Landing",
-        slug: "openclaw-rpg-landing",
-        description: "Marketing landing page for OpenClaw",
-        domain: "rpg.rahmanef.com",
-        type: "landing",
-        status: "active",
-        technologies: ["Next.js", "React", "TypeScript", "Tailwind", "shadcn/ui", "Framer Motion"],
-      },
-      {
-        name: "OpenClaw Data",
-        slug: "openclaw-data",
-        description: "Convex backend for persistent OpenClaw data storage",
-        domain: "api.rahmanef.com",
-        type: "api",
-        status: "active",
-        technologies: ["Convex", "TypeScript"],
-      },
-      {
-        name: "Convex Dashboard",
-        slug: "convex-dashboard",
-        description: "Self-hosted Convex admin dashboard",
-        domain: "db.rahmanef.com",
-        type: "web",
-        status: "active",
-        technologies: ["Convex"],
-      },
-      {
-        name: "Dokploy",
-        slug: "dokploy",
-        description: "Deployment manager for all services",
-        domain: "backend.rahmanef.com",
-        type: "web",
-        status: "active",
-        technologies: ["Docker", "Traefik", "PostgreSQL", "Redis"],
-      },
-      {
-        name: "RahmanEF Root",
-        slug: "rahmanef-root",
-        description: "Root placeholder for rahmanef.com",
-        domain: "rahmanef.com",
-        type: "landing",
-        status: "active",
-        technologies: ["HTML", "CSS"],
-      },
-    ];
-    
-    const results: string[] = [];
-    
-    for (const project of projects) {
-      const existing = await ctx.db
-        .query("projects")
-        .withIndex("by_slug", (q) => q.eq("slug", project.slug))
-        .first();
-      
-      if (!existing) {
-        await ctx.db.insert("projects", {
-          ...project,
-          createdAt: now,
-          updatedAt: now,
-          deployedAt: now,
-        });
-        results.push(project.name);
-      }
-    }
-    
-    return { created: results };
   },
 });
 
@@ -350,19 +442,25 @@ export const fullSync = internalMutation({
     
     // Sync daily notes
     results.dailyNotes = await ctx.runMutation(
-      { path: "sync:syncDailyNotes" } as any,
+      internal.sync.syncDailyNotes,
+      {}
+    );
+
+    // Sync project defaults
+    results.projectDefaults = await ctx.runMutation(
+      internal.sync.syncProjectDefaults,
       {}
     );
     
-    // Sync projects
+    // Sync projects catalog
     results.projects = await ctx.runMutation(
-      { path: "sync:syncProjects" } as any,
+      internal.projectsCatalog.syncProjects,
       {}
     );
     
     // Create user workspaces
     results.userWorkspaces = await ctx.runMutation(
-      { path: "sync:createAllUserWorkspaces" } as any,
+      internal.sync.createAllUserWorkspaces,
       {}
     );
     

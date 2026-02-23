@@ -103,66 +103,133 @@ export const getRoleByName = query({
 // USER ROLE MANAGEMENT
 // ============================================
 
+async function assertRoleManager(ctx: { db: any }, performerId: Id<"userProfiles">) {
+  const roles = await ctx.db
+    .query("userRoles")
+    .withIndex("by_user", (q: any) => q.eq("userId", performerId))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .collect();
+
+  const now = Date.now();
+  for (const ur of roles) {
+    if (ur.expiresAt && ur.expiresAt < now) continue;
+    const role = await ctx.db.get(ur.roleId);
+    if (role && (role.name === "super_admin" || role.name === "admin")) {
+      return;
+    }
+  }
+
+  throw new Error("Not authorized to manage roles");
+}
+
+async function grantRoleImpl(
+  ctx: { db: any },
+  args: {
+    userId: Id<"userProfiles">;
+    roleName: string;
+    performedBy?: Id<"userProfiles">;
+    expiresAt?: number;
+  }
+) {
+  const role = await ctx.db
+    .query("roles")
+    .withIndex("by_name", (q: any) => q.eq("name", args.roleName))
+    .first();
+
+  if (!role) {
+    throw new Error(`Role '${args.roleName}' not found`);
+  }
+
+  const existing = await ctx.db
+    .query("userRoles")
+    .withIndex("by_user_role", (q: any) =>
+      q.eq("userId", args.userId).eq("roleId", role._id)
+    )
+    .first();
+
+  const now = Date.now();
+
+  if (existing) {
+    await ctx.db.patch(existing._id, {
+      isActive: true,
+      grantedAt: now,
+      grantedBy: args.performedBy,
+      expiresAt: args.expiresAt,
+    });
+  } else {
+    await ctx.db.insert("userRoles", {
+      userId: args.userId,
+      roleId: role._id,
+      grantedBy: args.performedBy,
+      grantedAt: now,
+      expiresAt: args.expiresAt,
+      isActive: true,
+    });
+  }
+
+  await ctx.db.insert("permissionLogs", {
+    userId: args.userId,
+    action: "role_granted",
+    roleId: role._id,
+    performedBy: args.performedBy,
+    timestamp: now,
+    metadata: { roleName: args.roleName },
+  });
+
+  return { success: true, role: role.name };
+}
+
+async function revokeRoleImpl(
+  ctx: { db: any },
+  args: {
+    userId: Id<"userProfiles">;
+    roleName: string;
+    performedBy?: Id<"userProfiles">;
+  }
+) {
+  const role = await ctx.db
+    .query("roles")
+    .withIndex("by_name", (q: any) => q.eq("name", args.roleName))
+    .first();
+
+  if (!role) {
+    throw new Error(`Role '${args.roleName}' not found`);
+  }
+
+  const userRole = await ctx.db
+    .query("userRoles")
+    .withIndex("by_user_role", (q: any) =>
+      q.eq("userId", args.userId).eq("roleId", role._id)
+    )
+    .first();
+
+  if (userRole) {
+    await ctx.db.patch(userRole._id, { isActive: false });
+
+    await ctx.db.insert("permissionLogs", {
+      userId: args.userId,
+      action: "role_revoked",
+      roleId: role._id,
+      performedBy: args.performedBy,
+      timestamp: Date.now(),
+      metadata: { roleName: args.roleName },
+    });
+  }
+
+  return { success: true };
+}
+
 // Grant role to user
 export const grantRole = mutation({
   args: {
     userId: v.id("userProfiles"),
     roleName: v.string(),
-    grantedBy: v.optional(v.id("userProfiles")),
+    performedBy: v.id("userProfiles"),
     expiresAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    // Get the role
-    const role = await ctx.db
-      .query("roles")
-      .withIndex("by_name", (q) => q.eq("name", args.roleName))
-      .first();
-    
-    if (!role) {
-      throw new Error(`Role '${args.roleName}' not found`);
-    }
-    
-    // Check if user already has this role
-    const existing = await ctx.db
-      .query("userRoles")
-      .withIndex("by_user_role", (q) => 
-        q.eq("userId", args.userId).eq("roleId", role._id)
-      )
-      .first();
-    
-    const now = Date.now();
-    
-    if (existing) {
-      // Reactivate if inactive
-      await ctx.db.patch(existing._id, {
-        isActive: true,
-        grantedAt: now,
-        grantedBy: args.grantedBy,
-        expiresAt: args.expiresAt,
-      });
-    } else {
-      // Create new role assignment
-      await ctx.db.insert("userRoles", {
-        userId: args.userId,
-        roleId: role._id,
-        grantedBy: args.grantedBy,
-        grantedAt: now,
-        expiresAt: args.expiresAt,
-        isActive: true,
-      });
-    }
-    
-    // Log the action
-    await ctx.db.insert("permissionLogs", {
-      userId: args.userId,
-      action: "role_granted",
-      roleId: role._id,
-      performedBy: args.grantedBy,
-      timestamp: now,
-      metadata: { roleName: args.roleName },
-    });
-    
-    return { success: true, role: role.name };
+    await assertRoleManager(ctx, args.performedBy);
+    return await grantRoleImpl(ctx, args);
   },
 });
 
@@ -171,40 +238,35 @@ export const revokeRole = mutation({
   args: {
     userId: v.id("userProfiles"),
     roleName: v.string(),
-    revokedBy: v.optional(v.id("userProfiles")),
+    performedBy: v.id("userProfiles"),
   },
   handler: async (ctx, args) => {
-    const role = await ctx.db
-      .query("roles")
-      .withIndex("by_name", (q) => q.eq("name", args.roleName))
-      .first();
-    
-    if (!role) {
-      throw new Error(`Role '${args.roleName}' not found`);
-    }
-    
-    const userRole = await ctx.db
-      .query("userRoles")
-      .withIndex("by_user_role", (q) => 
-        q.eq("userId", args.userId).eq("roleId", role._id)
-      )
-      .first();
-    
-    if (userRole) {
-      await ctx.db.patch(userRole._id, { isActive: false });
-      
-      // Log the action
-      await ctx.db.insert("permissionLogs", {
-        userId: args.userId,
-        action: "role_revoked",
-        roleId: role._id,
-        performedBy: args.revokedBy,
-        timestamp: Date.now(),
-        metadata: { roleName: args.roleName },
-      });
-    }
-    
-    return { success: true };
+    await assertRoleManager(ctx, args.performedBy);
+    return await revokeRoleImpl(ctx, args);
+  },
+});
+
+// Internal role management (system use only)
+export const internalGrantRole = internalMutation({
+  args: {
+    userId: v.id("userProfiles"),
+    roleName: v.string(),
+    performedBy: v.optional(v.id("userProfiles")),
+    expiresAt: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    return await grantRoleImpl(ctx, args);
+  },
+});
+
+export const internalRevokeRole = internalMutation({
+  args: {
+    userId: v.id("userProfiles"),
+    roleName: v.string(),
+    performedBy: v.optional(v.id("userProfiles")),
+  },
+  handler: async (ctx, args) => {
+    return await revokeRoleImpl(ctx, args);
   },
 });
 

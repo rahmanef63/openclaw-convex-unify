@@ -14,6 +14,8 @@ import type * as agents from "../agents.js";
 import type * as heartbeatTasks from "../heartbeatTasks.js";
 import type * as internal_ from "../internal.js";
 import type * as memories from "../memories.js";
+import type * as projectDefaults from "../projectDefaults.js";
+import type * as projectsCatalog from "../projectsCatalog.js";
 import type * as rbac from "../rbac.js";
 import type * as scripts from "../scripts.js";
 import type * as seed from "../seed.js";
@@ -35,6 +37,8 @@ declare const fullApi: ApiFromModules<{
   heartbeatTasks: typeof heartbeatTasks;
   internal: typeof internal_;
   memories: typeof memories;
+  projectDefaults: typeof projectDefaults;
+  projectsCatalog: typeof projectsCatalog;
   rbac: typeof rbac;
   scripts: typeof scripts;
   seed: typeof seed;

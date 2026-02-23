@@ -14,6 +14,7 @@ export const getTableStats = query({
       "messages",
       "memories",
       "projects",
+      "projectDefaults",
       "dailyNotes",
       "roles",
       "userRoles",
