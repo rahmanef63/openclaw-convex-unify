@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "timestamp": "2026-03-02T15:53:05.724Z",
+  "mode": "maxItems",
+  "pageSize": 300,
+  "maxItems": 1200,
+  "pages": 4,
+  "totalCounted": 1200,
+  "cappedByMaxItems": true,
+  "isDone": false,
+  "latestTimestamp": 1772353336181
+}

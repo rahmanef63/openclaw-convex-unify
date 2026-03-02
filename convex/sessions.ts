@@ -1,231 +1,388 @@
-// Session & Message Functions
+/**
+ * sessions.ts — Session & Message CRUD
+ *
+ * sessions  : metadata percakapan (siapa, channel, status, counter)
+ * messages  : isi setiap pesan dalam sebuah session
+ *             FK: messages.sessionId → sessions._id  (proper Convex FK)
+ */
 
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
-// ============================================
-// SESSION MANAGEMENT
-// ============================================
+function hashEmbedding(text: string, dims = 128): number[] {
+  const vec = new Array(dims).fill(0) as number[];
+  const tokens = text.toLowerCase().split(/\s+/).filter(Boolean);
+  for (const tok of tokens) {
+    let h = 2166136261;
+    for (let i = 0; i < tok.length; i++) {
+      h ^= tok.charCodeAt(i);
+      h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
+    }
+    const idx = Math.abs(h) % dims;
+    const sign = (h & 1) === 0 ? 1 : -1;
+    vec[idx] += sign;
+  }
+  const norm = Math.sqrt(vec.reduce((s, x) => s + x * x, 0)) || 1;
+  return vec.map((x) => x / norm);
+}
 
-// Create or get session
-export const create = mutation({
+// ─────────────────────────────────────────────────────────
+// SESSIONS
+// ─────────────────────────────────────────────────────────
+
+/** Buat atau update session (upsert by sessionKey). */
+export const upsert = mutation({
   args: {
     sessionKey: v.string(),
-    channel: v.optional(v.string()),
-    userId: v.optional(v.id("userProfiles")),
-    agentId: v.optional(v.string()),
-    model: v.optional(v.string()),
-    metadata: v.optional(v.any()),
+    agentId:    v.optional(v.string()),
+    userId:     v.optional(v.id("userProfiles")),
+    channel:    v.optional(v.string()),
+    model:      v.optional(v.string()),
+    metadata:   v.optional(v.any()),
   },
   handler: async (ctx, args) => {
-    // Check if session exists
+    const now = Date.now();
     const existing = await ctx.db
       .query("sessions")
       .withIndex("by_sessionKey", (q) => q.eq("sessionKey", args.sessionKey))
       .first();
-    
+
     if (existing) {
-      // Update last active and return
       await ctx.db.patch(existing._id, {
-        lastActiveAt: Date.now(),
-        status: "active",
+        lastActiveAt: now,
+        status:       "active",
+        ...(args.agentId !== undefined && { agentId: args.agentId }),
+        ...(args.userId  !== undefined && { userId:  args.userId }),
+        ...(args.channel !== undefined && { channel: args.channel }),
+        ...(args.model   !== undefined && { model:   args.model }),
+        ...(args.metadata !== undefined && { metadata: args.metadata }),
       });
+      return existing._id;
+    }
+
+    return await ctx.db.insert("sessions", {
+      sessionKey:   args.sessionKey,
+      agentId:      args.agentId,
+      userId:       args.userId,
+      channel:      args.channel,
+      model:        args.model,
+      status:       "active",
+      messageCount: 0,
+      createdAt:    now,
+      lastActiveAt: now,
+      metadata:     args.metadata,
+    });
+  },
+});
+
+/** Alias lama untuk backward compat. */
+export const create = mutation({
+  args: {
+    sessionKey: v.string(),
+    channel:    v.optional(v.string()),
+    userId:     v.optional(v.id("userProfiles")),
+    agentId:    v.optional(v.string()),
+    model:      v.optional(v.string()),
+    metadata:   v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("sessions")
+      .withIndex("by_sessionKey", (q) => q.eq("sessionKey", args.sessionKey))
+      .first();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, { lastActiveAt: now, status: "active" });
       return await ctx.db.get(existing._id);
     }
-    
-    const now = Date.now();
+
     const id = await ctx.db.insert("sessions", {
-      ...args,
-      status: "active",
-      createdAt: now,
+      sessionKey:   args.sessionKey,
+      agentId:      args.agentId,
+      userId:       args.userId,
+      channel:      args.channel,
+      model:        args.model,
+      status:       "active",
+      messageCount: 0,
+      createdAt:    now,
       lastActiveAt: now,
+      metadata:     args.metadata,
     });
     return await ctx.db.get(id);
   },
 });
 
-// Get session by key
+/** Ambil session berdasarkan sessionKey. */
 export const getByKey = query({
   args: { sessionKey: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.db
+  handler: async (ctx, args) =>
+    ctx.db
       .query("sessions")
       .withIndex("by_sessionKey", (q) => q.eq("sessionKey", args.sessionKey))
-      .first();
-  },
+      .first(),
 });
 
-// Get sessions by user
+/** Ambil session berdasarkan Convex _id. */
+export const getById = query({
+  args: { id: v.id("sessions") },
+  handler: async (ctx, args) => ctx.db.get(args.id),
+});
+
+/** Ambil semua session milik satu agent. */
+export const getByAgent = query({
+  args: {
+    agentId: v.string(),
+    limit:   v.optional(v.number()),
+  },
+  handler: async (ctx, args) =>
+    ctx.db
+      .query("sessions")
+      .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
+      .order("desc")
+      .take(args.limit ?? 50),
+});
+
+/** Ambil semua session milik satu user. */
 export const getByUser = query({
   args: { userId: v.id("userProfiles") },
-  handler: async (ctx, args) => {
-    return await ctx.db
+  handler: async (ctx, args) =>
+    ctx.db
       .query("sessions")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .order("desc")
-      .take(50);
-  },
+      .take(50),
 });
 
-// Get active sessions by channel
-export const getActiveByChannel = query({
-  args: { channel: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.db
-      .query("sessions")
-      .withIndex("by_channel", (q) => q.eq("channel", args.channel))
-      .filter((q) => q.eq(q.field("status"), "active"))
-      .collect();
-  },
-});
-
-// Update last active (touch)
+/** Update lastActiveAt. */
 export const touch = mutation({
   args: { sessionKey: v.string() },
   handler: async (ctx, args) => {
-    const session = await ctx.db
+    const s = await ctx.db
       .query("sessions")
       .withIndex("by_sessionKey", (q) => q.eq("sessionKey", args.sessionKey))
       .first();
-    
-    if (session) {
-      await ctx.db.patch(session._id, {
-        lastActiveAt: Date.now(),
-      });
-      return await ctx.db.get(session._id);
-    }
-    return session;
+    if (s) await ctx.db.patch(s._id, { lastActiveAt: Date.now() });
   },
 });
 
-// Update session status
-export const updateStatus = mutation({
-  args: {
-    sessionKey: v.string(),
-    status: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const session = await ctx.db
-      .query("sessions")
-      .withIndex("by_sessionKey", (q) => q.eq("sessionKey", args.sessionKey))
-      .first();
-    
-    if (session) {
-      await ctx.db.patch(session._id, { status: args.status });
-      return await ctx.db.get(session._id);
-    }
-    return session;
-  },
-});
-
-// End session
+/** Tutup session. */
 export const end = mutation({
   args: { sessionKey: v.string() },
   handler: async (ctx, args) => {
-    const session = await ctx.db
+    const s = await ctx.db
       .query("sessions")
       .withIndex("by_sessionKey", (q) => q.eq("sessionKey", args.sessionKey))
       .first();
-    
-    if (session) {
-      await ctx.db.patch(session._id, { status: "ended" });
-      return await ctx.db.get(session._id);
-    }
-    return session;
+    if (s) await ctx.db.patch(s._id, { status: "ended", lastActiveAt: Date.now() });
   },
 });
 
-// ============================================
-// MESSAGE LOGGING
-// ============================================
+/** Stats semua session (untuk dashboard). */
+export const getAllStats = query({
+  args: {},
+  handler: async (ctx) => {
+    const sessions = await ctx.db.query("sessions").collect();
+    return sessions.map((s) => ({
+      sessionKey:   s.sessionKey,
+      agentId:      s.agentId,
+      channel:      s.channel,
+      status:       s.status,
+      messageCount: s.messageCount,
+      createdAt:    s.createdAt,
+      lastActiveAt: s.lastActiveAt,
+    }));
+  },
+});
 
-// Log a message
+// ─────────────────────────────────────────────────────────
+// MESSAGES  (FK: sessionId → sessions._id)
+// ─────────────────────────────────────────────────────────
+
+/** Tambah satu pesan ke session. */
 export const logMessage = mutation({
   args: {
-    sessionId: v.string(),
-    role: v.string(), // user, assistant, system
-    content: v.string(),
-    messageId: v.optional(v.string()),
-    metadata: v.optional(v.any()),
+    sessionId:  v.id("sessions"),   // FK (proper Convex ID)
+    agentId:    v.optional(v.string()),
+    role:       v.string(),          // user | assistant | system | tool
+    content:    v.string(),
+    externalId: v.optional(v.string()),
+    tokenCount: v.optional(v.number()),
+    metadata:   v.optional(v.any()),
   },
   handler: async (ctx, args) => {
+    const now = Date.now();
     const id = await ctx.db.insert("messages", {
-      sessionId: args.sessionId,
-      role: args.role,
-      content: args.content,
-      timestamp: Date.now(),
-      messageId: args.messageId,
-      metadata: args.metadata,
+      sessionId:  args.sessionId,
+      agentId:    args.agentId,
+      role:       args.role,
+      content:    args.content,
+      timestamp:  now,
+      externalId: args.externalId,
+      tokenCount: args.tokenCount,
+      metadata:   args.metadata,
     });
-    
-    // Touch the session
-    const session = await ctx.db
-      .query("sessions")
-      .withIndex("by_sessionKey", (q) => q.eq("sessionKey", args.sessionId))
-      .first();
-    
-    if (session) {
-      await ctx.db.patch(session._id, { lastActiveAt: Date.now() });
+
+    // FINAL STAGE #2: auto-ingest vector in real-time (hash embedding fallback)
+    try {
+      await ctx.db.insert("vectorChunks", {
+        kind: "session_message",
+        sourceId: args.externalId ?? `msg:${id}`,
+        sessionId: args.sessionId,
+        agentId: args.agentId,
+        text: args.content.slice(0, 1200),
+        embedding: hashEmbedding(args.content),
+        dimensions: 128,
+        metadata: {
+          role: args.role,
+          timestamp: now,
+          messageId: id,
+          externalId: args.externalId,
+        },
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch {
+      // do not fail message logging if vector insert fails
     }
-    
-    return await ctx.db.get(id);
+
+    // update counter di sessions
+    const session = await ctx.db.get(args.sessionId);
+    if (session) {
+      await ctx.db.patch(args.sessionId, {
+        messageCount: (session.messageCount ?? 0) + 1,
+        lastActiveAt: now,
+      });
+    }
+    return id;
   },
 });
 
-// Get messages for a session
+/** Tambah banyak pesan sekaligus (bulk import dari JSONL). */
+export const batchLogMessages = mutation({
+  args: {
+    sessionId: v.id("sessions"),   // FK
+    agentId:   v.optional(v.string()),
+    messages:  v.array(v.object({
+      role:       v.string(),
+      content:    v.string(),
+      timestamp:  v.number(),
+      externalId: v.optional(v.string()),
+      tokenCount: v.optional(v.number()),
+      metadata:   v.optional(v.any()),
+    })),
+  },
+  handler: async (ctx, args) => {
+    let count = 0;
+    for (const msg of args.messages) {
+      const mid = await ctx.db.insert("messages", {
+        sessionId:  args.sessionId,
+        agentId:    args.agentId,
+        role:       msg.role,
+        content:    msg.content,
+        timestamp:  msg.timestamp,
+        externalId: msg.externalId,
+        tokenCount: msg.tokenCount,
+        metadata:   msg.metadata,
+      });
+
+      // auto-ingest vector per message
+      try {
+        await ctx.db.insert("vectorChunks", {
+          kind: "session_message",
+          sourceId: msg.externalId ?? `msg:${mid}`,
+          sessionId: args.sessionId,
+          agentId: args.agentId,
+          text: msg.content.slice(0, 1200),
+          embedding: hashEmbedding(msg.content),
+          dimensions: 128,
+          metadata: {
+            role: msg.role,
+            timestamp: msg.timestamp,
+            messageId: mid,
+            externalId: msg.externalId,
+          },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+      } catch {
+        // ignore vector failures in batch ingest
+      }
+      count++;
+    }
+    // update counter
+    const session = await ctx.db.get(args.sessionId);
+    if (session) {
+      await ctx.db.patch(args.sessionId, {
+        messageCount: (session.messageCount ?? 0) + count,
+        lastActiveAt: Date.now(),
+      });
+    }
+    return { inserted: count };
+  },
+});
+
+/** Ambil pesan dari sebuah session (descending time, paginated). */
 export const getMessages = query({
   args: {
-    sessionId: v.string(),
-    limit: v.optional(v.number()),
-    before: v.optional(v.number()),
+    sessionId: v.id("sessions"),  // FK
+    limit:     v.optional(v.number()),
+    before:    v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    let query = ctx.db
+    let q = ctx.db
       .query("messages")
       .withIndex("by_session_time", (q) => q.eq("sessionId", args.sessionId));
-    
     if (args.before) {
-      query = query.filter((q) => q.lt(q.field("timestamp"), args.before!));
+      q = q.filter((q) => q.lt(q.field("timestamp"), args.before!));
     }
-    
-    return await query
-      .order("desc")
-      .take(args.limit || 50);
+    return q.order("desc").take(args.limit ?? 50);
   },
 });
 
-// Get recent messages (for context)
+/** Ambil pesan terbaru dari sebuah session. */
 export const getRecentMessages = query({
   args: {
-    sessionId: v.string(),
-    limit: v.optional(v.number()),
+    sessionId: v.id("sessions"),  // FK
+    limit:     v.optional(v.number()),
   },
-  handler: async (ctx, args) => {
-    return await ctx.db
+  handler: async (ctx, args) =>
+    ctx.db
       .query("messages")
       .withIndex("by_session_time", (q) => q.eq("sessionId", args.sessionId))
       .order("desc")
-      .take(args.limit || 20);
-  },
+      .take(args.limit ?? 20),
 });
 
-// Count messages in session
+/** Hitung pesan dalam sebuah session. */
 export const countMessages = query({
-  args: { sessionId: v.string() },
+  args: { sessionId: v.id("sessions") },
   handler: async (ctx, args) => {
-    const messages = await ctx.db
+    const msgs = await ctx.db
       .query("messages")
       .withIndex("by_session", (q) => q.eq("sessionId", args.sessionId))
       .collect();
-    return messages.length;
+    return msgs.length;
   },
 });
 
-// ============================================
-// SESSION STATISTICS
-// ============================================
+/** Cek apakah pesan sudah ada (by externalId) — untuk avoid duplikat saat sync. */
+export const existsByExternalId = query({
+  args: {
+    sessionId:  v.id("sessions"),
+    externalId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const msg = await ctx.db
+      .query("messages")
+      .withIndex("by_session", (q) => q.eq("sessionId", args.sessionId))
+      .filter((q) => q.eq(q.field("externalId"), args.externalId))
+      .first();
+    return msg !== null;
+  },
+});
 
-// Get session stats
+/** Stats untuk dashboard — semua sessions summary. */
 export const getStats = query({
   args: { sessionKey: v.string() },
   handler: async (ctx, args) => {
@@ -233,84 +390,64 @@ export const getStats = query({
       .query("sessions")
       .withIndex("by_sessionKey", (q) => q.eq("sessionKey", args.sessionKey))
       .first();
-    
     if (!session) return null;
-    
-    const messages = await ctx.db
-      .query("messages")
-      .withIndex("by_session", (q) => q.eq("sessionId", args.sessionKey))
-      .collect();
-    
-    const userMessages = messages.filter(m => m.role === "user").length;
-    const assistantMessages = messages.filter(m => m.role === "assistant").length;
-    
     return {
-      session,
-      totalMessages: messages.length,
-      userMessages,
-      assistantMessages,
-      duration: session.lastActiveAt - session.createdAt,
+      sessionKey:   session.sessionKey,
+      agentId:      session.agentId,
+      channel:      session.channel,
+      status:       session.status,
+      messageCount: session.messageCount,
+      createdAt:    session.createdAt,
+      lastActiveAt: session.lastActiveAt,
     };
   },
 });
 
-// Get all session stats (admin)
-export const getAllStats = query({
-  handler: async (ctx) => {
-    const sessions = await ctx.db.query("sessions").collect();
-    
-    const stats = [];
-    for (const session of sessions) {
-      const messages = await ctx.db
-        .query("messages")
-        .withIndex("by_session", (q) => q.eq("sessionId", session.sessionKey))
-        .collect();
-      
-      stats.push({
-        sessionKey: session.sessionKey,
-        channel: session.channel,
-        status: session.status,
-        createdAt: session.createdAt,
-        lastActiveAt: session.lastActiveAt,
-        messageCount: messages.length,
-      });
-    }
-    
-    return stats;
-  },
-});
+// ─────────────────────────────────────────────────────────
+// AGENT SESSIONS  (detailed tracking)
+// ─────────────────────────────────────────────────────────
 
-// ============================================
-// BATCH LOGGING (for syncing existing messages)
-// ============================================
-
-// Batch log messages
-export const batchLogMessages = mutation({
+/** Upsert agent session by external sessionId. */
+export const upsertAgentSession = mutation({
   args: {
-    sessionId: v.string(),
-    messages: v.array(v.object({
-      role: v.string(),
-      content: v.string(),
-      timestamp: v.number(),
-      messageId: v.optional(v.string()),
-      metadata: v.optional(v.any()),
-    })),
+    sessionId:       v.string(),   // external UUID
+    convexSessionId: v.optional(v.id("sessions")),  // FK
+    agentId:         v.string(),
+    userId:          v.optional(v.id("userProfiles")),
+    channel:         v.optional(v.string()),
+    model:           v.optional(v.string()),
+    status:          v.optional(v.string()),
+    messageCount:    v.optional(v.number()),
+    metadata:        v.optional(v.any()),
   },
   handler: async (ctx, args) => {
-    let count = 0;
-    
-    for (const msg of args.messages) {
-      await ctx.db.insert("messages", {
-        sessionId: args.sessionId,
-        role: msg.role,
-        content: msg.content,
-        timestamp: msg.timestamp,
-        messageId: msg.messageId,
-        metadata: msg.metadata,
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("agentSessions")
+      .withIndex("by_sessionId", (q) => q.eq("sessionId", args.sessionId))
+      .first();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        ...(args.status       && { status:          args.status }),
+        ...(args.messageCount && { messageCount:    args.messageCount }),
+        ...(args.convexSessionId && { convexSessionId: args.convexSessionId }),
+        ...(args.metadata     && { metadata:        args.metadata }),
       });
-      count++;
+      return existing._id;
     }
-    
-    return { logged: count };
+
+    return await ctx.db.insert("agentSessions", {
+      sessionId:       args.sessionId,
+      convexSessionId: args.convexSessionId,
+      agentId:         args.agentId,
+      userId:          args.userId,
+      channel:         args.channel,
+      model:           args.model,
+      status:          args.status ?? "active",
+      startedAt:       now,
+      messageCount:    args.messageCount ?? 0,
+      metadata:        args.metadata,
+    });
   },
 });

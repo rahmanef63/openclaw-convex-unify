@@ -111,12 +111,23 @@ export const saveFile = mutation({
 
 // Get file by path
 export const getFile = query({
-  args: { path: v.string() },
+  args: {
+    path: v.string(),
+    ownerId: v.optional(v.id("userProfiles")),
+    agentId: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
-    return await ctx.db
+    if (!args.ownerId && !args.agentId) {
+      throw new Error("Scope required: provide ownerId or agentId");
+    }
+    const file = await ctx.db
       .query("workspaceFiles")
       .withIndex("by_path", (q) => q.eq("path", args.path))
       .first();
+    if (!file) return null;
+    if (args.ownerId && file.ownerId !== args.ownerId) return null;
+    if (args.agentId && file.agentId !== args.agentId) return null;
+    return file;
   },
 });
 
@@ -145,23 +156,43 @@ export const getFilesByOwner = query({
 
 // Get files by category (e.g., all "agent" files)
 export const getFilesByCategory = query({
-  args: { category: v.string() },
+  args: {
+    category: v.string(),
+    ownerId: v.optional(v.id("userProfiles")),
+    agentId: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
-    return await ctx.db
+    if (!args.ownerId && !args.agentId) {
+      throw new Error("Scope required: provide ownerId or agentId");
+    }
+
+    let files = await ctx.db
       .query("workspaceFiles")
       .withIndex("by_category", (q) => q.eq("category", args.category))
       .collect();
+
+    if (args.ownerId) files = files.filter((f) => f.ownerId === args.ownerId);
+    if (args.agentId) files = files.filter((f) => f.agentId === args.agentId);
+
+    return files;
   },
 });
 
 // Get files by agent
 export const getFilesByAgent = query({
-  args: { agentId: v.string() },
+  args: {
+    agentId: v.string(),
+    ownerId: v.optional(v.id("userProfiles")),
+  },
   handler: async (ctx, args) => {
-    return await ctx.db
+    let files = await ctx.db
       .query("workspaceFiles")
       .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
       .collect();
+
+    if (args.ownerId) files = files.filter((f) => f.ownerId === args.ownerId);
+
+    return files;
   },
 });
 
@@ -317,36 +348,58 @@ export const listWorkspaces = query({
 
 // Get all files in a workspace (by path prefix)
 export const getWorkspaceFiles = query({
-  args: { rootPath: v.string() },
+  args: {
+    rootPath: v.string(),
+    ownerId: v.optional(v.id("userProfiles")),
+    agentId: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
-    // Get all files and filter by path prefix
+    if (!args.ownerId && !args.agentId) {
+      throw new Error("Scope required: provide ownerId or agentId");
+    }
+
     const allFiles = await ctx.db.query("workspaceFiles").collect();
     const prefix = args.rootPath;
-    
-    return allFiles.filter(f => 
-      f.path === prefix || f.path.startsWith(prefix + "/")
-    );
+
+    return allFiles.filter((f) => {
+      const inPath = f.path === prefix || f.path.startsWith(prefix + "/");
+      if (!inPath) return false;
+      if (args.ownerId && f.ownerId !== args.ownerId) return false;
+      if (args.agentId && f.agentId !== args.agentId) return false;
+      return true;
+    });
   },
 });
 
 // Export workspace (all files as object)
 export const exportWorkspace = query({
-  args: { rootPath: v.string() },
+  args: {
+    rootPath: v.string(),
+    ownerId: v.optional(v.id("userProfiles")),
+    agentId: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
+    if (!args.ownerId && !args.agentId) {
+      throw new Error("Scope required: provide ownerId or agentId");
+    }
+
     const files = await ctx.db.query("workspaceFiles").collect();
     const prefix = args.rootPath;
-    
+
     const result: Record<string, { content: string; version: number }> = {};
-    
+
     for (const f of files) {
-      if (f.path === prefix || f.path.startsWith(prefix + "/")) {
-        result[f.path] = {
-          content: f.content,
-          version: f.version,
-        };
-      }
+      const inPath = f.path === prefix || f.path.startsWith(prefix + "/");
+      if (!inPath) continue;
+      if (args.ownerId && f.ownerId !== args.ownerId) continue;
+      if (args.agentId && f.agentId !== args.agentId) continue;
+
+      result[f.path] = {
+        content: f.content,
+        version: f.version,
+      };
     }
-    
+
     return result;
   },
 });
@@ -408,6 +461,54 @@ export const cloneTemplate = mutation({
       updatedAt: now,
     });
     await updateWorkspaceFileCount(ctx, args.newPath, 1);
+    return await ctx.db.get(id);
+  },
+});
+
+
+// Upsert workspace link (patch existing rootPath with owner/agent linkage)
+export const upsertWorkspaceLink = mutation({
+  args: {
+    rootPath: v.string(),
+    name: v.string(),
+    type: v.string(),
+    ownerId: v.optional(v.id("userProfiles")),
+    agentId: v.optional(v.string()),
+    description: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("workspaceTrees")
+      .withIndex("by_rootPath", (q) => q.eq("rootPath", args.rootPath))
+      .first();
+
+    const now = Date.now();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        name: args.name,
+        type: args.type,
+        ownerId: args.ownerId,
+        agentId: args.agentId,
+        description: args.description,
+        status: "active",
+        updatedAt: now,
+      });
+      return await ctx.db.get(existing._id);
+    }
+
+    const id = await ctx.db.insert("workspaceTrees", {
+      rootPath: args.rootPath,
+      name: args.name,
+      type: args.type,
+      ownerId: args.ownerId,
+      parentId: undefined,
+      agentId: args.agentId,
+      description: args.description,
+      fileCount: 0,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
     return await ctx.db.get(id);
   },
 });

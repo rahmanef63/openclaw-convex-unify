@@ -17,6 +17,16 @@ export const registerAgent = mutation({
     capabilities: v.optional(v.array(v.string())),
     config: v.optional(v.any()),
     owner: v.optional(v.id("userProfiles")),
+    status: v.optional(v.string()),
+    isActive: v.optional(v.string()),
+    soulMd: v.optional(v.string()),
+    identityMd: v.optional(v.string()),
+    agentsMd: v.optional(v.string()),
+    toolsMd: v.optional(v.string()),
+    userMd: v.optional(v.string()),
+    heartbeatMd: v.optional(v.string()),
+    bootstrapMd: v.optional(v.string()),
+    memoryMd: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -37,7 +47,8 @@ export const registerAgent = mutation({
       const id = await ctx.db.insert("agents", {
         ...args,
         type: args.type || "main",
-        status: "active",
+        status: args.status || "active",
+        isActive: args.isActive || "active",
         createdAt: now,
         updatedAt: now,
         lastActiveAt: now,
