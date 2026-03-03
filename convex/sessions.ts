@@ -562,3 +562,52 @@ export const logMessageScoped = mutation({
     return id;
   },
 });
+
+// Tenant-guarded BATCH message logging (high performance)
+export const batchLogMessagesScoped = mutation({
+  args: {
+    tenantId: v.string(),
+    sessionId: v.id("sessions"),
+    agentId: v.optional(v.string()),
+    messages: v.array(v.object({
+      role: v.string(),
+      content: v.string(),
+      externalId: v.optional(v.string()),
+      tokenCount: v.optional(v.number()),
+      metadata: v.optional(v.any()),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const tenantId = await requireTenant(ctx, args.tenantId);
+    const session = await ctx.db.get(args.sessionId);
+    if (!session) throw new Error("NOT_FOUND: session");
+    if (session.tenantId && session.tenantId !== tenantId) {
+      throw new Error("FORBIDDEN: session tenant mismatch");
+    }
+
+    const now = Date.now();
+    let count = 0;
+    for (const msg of args.messages) {
+      await ctx.db.insert("messages", {
+        tenantId,
+        sessionId: args.sessionId,
+        agentId: args.agentId,
+        role: msg.role,
+        content: msg.content,
+        timestamp: now + count,
+        externalId: msg.externalId,
+        tokenCount: msg.tokenCount,
+        metadata: msg.metadata,
+      });
+      count++;
+    }
+
+    await ctx.db.patch(args.sessionId, {
+      tenantId,
+      messageCount: (session.messageCount ?? 0) + count,
+      lastActiveAt: now,
+    });
+
+    return { inserted: count };
+  },
+});
