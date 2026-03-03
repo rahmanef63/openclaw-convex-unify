@@ -22,6 +22,8 @@ const pageSizeArg = args.find((a) => a.startsWith('--pageSize='));
 const defaultPageSize = pageSizeArg ? Number(pageSizeArg.split('=')[1]) : null;
 const stateFileArg = args.find((a) => a.startsWith('--stateFile='));
 const stateFile = stateFileArg ? stateFileArg.split('=')[1] : path.join(process.cwd(), 'scripts', '.backfill_cursor_state.json');
+const tablesArg = args.find((a) => a.startsWith('--tables='));
+const tableFilter = tablesArg ? new Set(tablesArg.split('=')[1].split(',').map(s => s.trim()).filter(Boolean)) : null;
 
 const CONVEX_URL = process.env.CONVEX_SELF_HOSTED_URL || 'https://api.rahmanef.com';
 const CONVEX_ADMIN_KEY = process.env.CONVEX_SELF_HOSTED_ADMIN_KEY || 'rahmanef-convex|01365a724e228c4bffd8f1e0bcc36f9ace8a551df04299000957a30162348e10bc2c820a4e';
@@ -275,4 +277,6 @@ async function main() {
 }
 
 main().catch((e) => { console.error(String(e)); process.exit(1); });
+
+
 
