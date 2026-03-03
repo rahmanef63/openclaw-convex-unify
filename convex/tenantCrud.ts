@@ -18,6 +18,39 @@ function enforceTenant(argsTenantId: string, instanceTenantId: string | null) {
   }
 }
 
+// Admin function to set instance tenant config
+export const setInstanceConfig = mutation({
+  args: { tenantId: v.string(), notes: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.query("instanceConfig").first();
+    const ts = now();
+    
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        tenantId: args.tenantId,
+        notes: args.notes,
+        updatedAt: ts,
+      });
+      return { ok: true, id: existing._id, updated: true };
+    }
+    
+    const id = await ctx.db.insert("instanceConfig", {
+      tenantId: args.tenantId,
+      notes: args.notes,
+      createdAt: ts,
+      updatedAt: ts,
+    });
+    return { ok: true, id, updated: false };
+  },
+});
+
+export const getInstanceConfig = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("instanceConfig").first();
+  },
+});
+
 export const createItem = mutation({
   args: {
     tenantId: v.string(),
