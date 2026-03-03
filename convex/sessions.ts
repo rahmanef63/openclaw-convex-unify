@@ -167,6 +167,7 @@ export const getByUser = query({
 export const touch = mutation({
   args: { sessionKey: v.string() },
   handler: async (ctx, args) => {
+    legacyDisabled("sessions.getByKey");
     const s = await ctx.db
       .query("sessions")
       .withIndex("by_sessionKey", (q) => q.eq("sessionKey", args.sessionKey))
@@ -179,6 +180,7 @@ export const touch = mutation({
 export const end = mutation({
   args: { sessionKey: v.string() },
   handler: async (ctx, args) => {
+    legacyDisabled("sessions.end");
     const s = await ctx.db
       .query("sessions")
       .withIndex("by_sessionKey", (q) => q.eq("sessionKey", args.sessionKey))
@@ -191,6 +193,7 @@ export const end = mutation({
 export const getAllStats = query({
   args: {},
   handler: async (ctx) => {
+    legacyDisabled("sessions.getAllStats");
     const sessions = await ctx.db.query("sessions").collect();
     return sessions.map((s) => ({
       sessionKey:   s.sessionKey,
@@ -390,6 +393,7 @@ export const getMessages = query({
     before:    v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("sessions.getMessages");
     let q = ctx.db
       .query("messages")
       .withIndex("by_session_time", (q) => q.eq("sessionId", args.sessionId));
@@ -418,6 +422,7 @@ export const getRecentMessages = query({
 export const countMessages = query({
   args: { sessionId: v.id("sessions") },
   handler: async (ctx, args) => {
+    legacyDisabled("sessions.getRecentMessages");
     const msgs = await ctx.db
       .query("messages")
       .withIndex("by_session", (q) => q.eq("sessionId", args.sessionId))
@@ -433,6 +438,7 @@ export const existsByExternalId = query({
     externalId: v.string(),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("sessions.existsByExternalId");
     const msg = await ctx.db
       .query("messages")
       .withIndex("by_session", (q) => q.eq("sessionId", args.sessionId))
@@ -446,6 +452,7 @@ export const existsByExternalId = query({
 export const getStats = query({
   args: { sessionKey: v.string() },
   handler: async (ctx, args) => {
+    legacyDisabled("sessions.getStats");
     const session = await ctx.db
       .query("sessions")
       .withIndex("by_sessionKey", (q) => q.eq("sessionKey", args.sessionKey))
@@ -481,6 +488,7 @@ export const upsertAgentSession = mutation({
     metadata:        v.optional(v.any()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("sessions.upsertAgentSession");
     const now = Date.now();
     const existing = await ctx.db
       .query("agentSessions")

@@ -146,6 +146,7 @@ export const getFilesByOwner = query({
     category: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.getFilesByOwner");
     if (args.category) {
       return await ctx.db
         .query("workspaceFiles")
@@ -170,6 +171,7 @@ export const getFilesByCategory = query({
     agentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.getFilesByCategory");
     if (!args.ownerId && !args.agentId) {
       throw new Error("Scope required: provide ownerId or agentId");
     }
@@ -193,6 +195,7 @@ export const getFilesByAgent = query({
     ownerId: v.optional(v.id("userProfiles")),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.getFilesByAgent");
     let files = await ctx.db
       .query("workspaceFiles")
       .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
@@ -208,6 +211,7 @@ export const getFilesByAgent = query({
 export const deleteFile = mutation({
   args: { path: v.string() },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.deleteFile");
     const file = await ctx.db
       .query("workspaceFiles")
       .withIndex("by_path", (q) => q.eq("path", args.path))
@@ -240,6 +244,7 @@ export const getFileHistory = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.getFileHistory");
     const file = await ctx.db
       .query("workspaceFiles")
       .withIndex("by_path", (q) => q.eq("path", args.path))
@@ -271,6 +276,7 @@ export const createWorkspace = mutation({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.createWorkspace");
     const existing = await ctx.db
       .query("workspaceTrees")
       .withIndex("by_rootPath", (q) => q.eq("rootPath", args.rootPath))
@@ -303,6 +309,7 @@ export const createWorkspace = mutation({
 export const getWorkspace = query({
   args: { rootPath: v.string() },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.getWorkspace");
     return await ctx.db
       .query("workspaceTrees")
       .withIndex("by_rootPath", (q) => q.eq("rootPath", args.rootPath))
@@ -314,6 +321,7 @@ export const getWorkspace = query({
 export const getWorkspacesByOwner = query({
   args: { ownerId: v.id("userProfiles") },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.getWorkspacesByOwner");
     return await ctx.db
       .query("workspaceTrees")
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
@@ -326,6 +334,7 @@ export const getWorkspacesByOwner = query({
 export const getChildWorkspaces = query({
   args: { parentId: v.id("workspaceTrees") },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.getChildWorkspaces");
     return await ctx.db
       .query("workspaceTrees")
       .withIndex("by_parent", (q) => q.eq("parentId", args.parentId))
@@ -338,6 +347,7 @@ export const getChildWorkspaces = query({
 export const listWorkspaces = query({
   args: { type: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.listWorkspaces");
     let query = ctx.db.query("workspaceTrees");
     
     if (args.type) {
@@ -362,6 +372,7 @@ export const getWorkspaceFiles = query({
     agentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.getWorkspaceFiles");
     if (!args.ownerId && !args.agentId) {
       throw new Error("Scope required: provide ownerId or agentId");
     }
@@ -387,6 +398,7 @@ export const exportWorkspace = query({
     agentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.exportWorkspace");
     if (!args.ownerId && !args.agentId) {
       throw new Error("Scope required: provide ownerId or agentId");
     }
@@ -419,6 +431,7 @@ export const exportWorkspace = query({
 // Get template files
 export const getTemplates = query({
   handler: async (ctx) => {
+    legacyDisabled("workspace.getTemplates");
     return await ctx.db
       .query("workspaceFiles")
       .withIndex("by_isTemplate", (q) => q.eq("isTemplate", true))
@@ -435,6 +448,7 @@ export const cloneTemplate = mutation({
     replacements: v.optional(v.any()), // { "{{name}}": "Rahman" }
   },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.cloneTemplate");
     const template = await ctx.db
       .query("workspaceFiles")
       .withIndex("by_path", (q) => q.eq("path", args.templatePath))
@@ -485,6 +499,7 @@ export const upsertWorkspaceLink = mutation({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.upsertWorkspaceLink");
     const existing = await ctx.db
       .query("workspaceTrees")
       .withIndex("by_rootPath", (q) => q.eq("rootPath", args.rootPath))

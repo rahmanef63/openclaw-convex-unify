@@ -253,6 +253,7 @@ export const getSessionHistory = query({
 export const getAgentStats = query({
   args: { agentId: v.string() },
   handler: async (ctx, args) => {
+    legacyDisabled("agents.getAgentStats");
     const sessions = await ctx.db
       .query("agentSessions")
       .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))

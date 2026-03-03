@@ -140,6 +140,7 @@ export const search = query({
     limit:      v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("memories.getByAgent");
     const all = args.agentId
       ? await ctx.db
           .query("memories")
@@ -162,6 +163,7 @@ export const search = query({
 export const touch = mutation({
   args: { id: v.id("memories") },
   handler: async (ctx, args) => {
+    legacyDisabled("memories.touch");
     const mem = await ctx.db.get(args.id);
     if (!mem) return;
     await ctx.db.patch(args.id, {
@@ -175,6 +177,7 @@ export const touch = mutation({
 export const remove = mutation({
   args: { id: v.id("memories") },
   handler: async (ctx, args) => {
+    legacyDisabled("memories.remove");
     await ctx.db.delete(args.id);
     return true;
   },
