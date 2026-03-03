@@ -6,6 +6,7 @@
  *  - FK  : v.id("tableName") untuk referensi ke tabel Convex
  *  - Ref : v.string() untuk agentId (identifier string, bukan Convex ID)
  *  - Setiap FK wajib punya index
+ *  - tenantId: v.optional(v.string()) untuk multi-tenant support
  *
  * Relasi utama:
  *   userProfiles  ──< userRoles >── roles
@@ -36,19 +37,20 @@ export default defineSchema({
     .index("by_tenant", ["tenantId"]),
 
   // ══════════════════════════════════════════════════════
-  // USER PROFILES
+  // USER PROFILES [TENANT-BOUND]
   // PK: _id | Ref'd by: sessions, memories, workspaceFiles,
   //          dailyNotes, notifications, userRoles, agents(owner)
   // ══════════════════════════════════════════════════════
   userProfiles: defineTable({
+    tenantId: v.optional(v.string()),
     phone:    v.optional(v.string()),
     email:    v.optional(v.string()),
     name:     v.optional(v.string()),
     nickname: v.optional(v.string()),
-    labels:   v.optional(v.array(v.string())), // e.g. ["ka irul","family","business partner"]
+    labels:   v.optional(v.array(v.string())),
     profession: v.optional(v.string()),
     profileUrls: v.optional(v.array(v.object({
-      type: v.string(), // website|instagram|linkedin|x|tiktok|other
+      type: v.string(),
       url:  v.string(),
     }))),
     timezone: v.optional(v.string()),
@@ -64,12 +66,12 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_phone", ["phone"])
     .index("by_email", ["email"]),
 
   // ══════════════════════════════════════════════════════
-  // USER IDENTITIES (channel external IDs -> userProfile)
-  // FK: userId -> userProfiles._id
+  // USER IDENTITIES (system table - no tenantId)
   // ══════════════════════════════════════════════════════
   userIdentities: defineTable({
     userId:         v.id("userProfiles"),
@@ -86,29 +88,28 @@ export default defineSchema({
     .index("by_channel", ["channel"]),
 
   // ══════════════════════════════════════════════════════
-  // RBAC — ROLES
-  // PK: _id | Ref'd by: userRoles, permissionLogs
+  // RBAC — ROLES [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   roles: defineTable({
-    name:        v.string(),   // super_admin | admin | moderator | user | guest
+    tenantId: v.optional(v.string()),
+    name:        v.string(),
     displayName: v.string(),
     description: v.optional(v.string()),
-    level:       v.number(),   // 100=super_admin, 50=admin, 30=moderator, 10=user, 0=guest
-    permissions: v.array(v.string()), // ["read","write","delete","admin","manage_users"]
-    isSystem:    v.boolean(),  // system roles cannot be deleted
+    level:       v.number(),
+    permissions: v.array(v.string()),
+    isSystem:    v.boolean(),
     createdAt:   v.number(),
     updatedAt:   v.number(),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_name",  ["name"])
     .index("by_level", ["level"]),
 
   // ══════════════════════════════════════════════════════
-  // RBAC — USER ROLES  (junction: userProfiles × roles)
-  // FK: userId → userProfiles._id
-  // FK: roleId → roles._id
-  // FK: grantedBy → userProfiles._id (optional)
+  // RBAC — USER ROLES [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   userRoles: defineTable({
+    tenantId: v.optional(v.string()),
     userId:    v.id("userProfiles"),
     roleId:    v.id("roles"),
     grantedBy: v.optional(v.id("userProfiles")),
@@ -116,46 +117,43 @@ export default defineSchema({
     expiresAt: v.optional(v.number()),
     isActive:  v.boolean(),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_user",      ["userId"])
     .index("by_role",      ["roleId"])
     .index("by_user_role", ["userId", "roleId"]),
 
   // ══════════════════════════════════════════════════════
-  // RBAC — PERMISSION LOGS
-  // FK: userId      → userProfiles._id
-  // FK: roleId      → roles._id (optional)
-  // FK: performedBy → userProfiles._id (optional)
+  // RBAC — PERMISSION LOGS [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   permissionLogs: defineTable({
+    tenantId: v.optional(v.string()),
     userId:      v.id("userProfiles"),
-    action:      v.string(), // role_granted | role_revoked | permission_check
+    action:      v.string(),
     resource:    v.optional(v.string()),
     roleId:      v.optional(v.id("roles")),
     performedBy: v.optional(v.id("userProfiles")),
     timestamp:   v.number(),
     metadata:    v.optional(v.any()),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_user",      ["userId"])
     .index("by_timestamp", ["timestamp"])
     .index("by_user_time", ["userId", "timestamp"]),
 
   // ══════════════════════════════════════════════════════
-  // AGENTS
-  // PK: _id | Ref: agentId (string) used across tables
-  // FK: owner → userProfiles._id (optional)
-  // Ref'd by: sessions (agentId string), workspaceFiles (agentId string)
+  // AGENTS [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   agents: defineTable({
-    agentId:      v.string(),  // "main" | "si-coder" | "si-db" | etc.
+    tenantId: v.optional(v.string()),
+    agentId:      v.string(),
     name:         v.string(),
-    type:         v.string(),  // "main" | "specialized" | "sub" | "worker"
+    type:         v.string(),
     model:        v.optional(v.string()),
-    status:       v.optional(v.string()),  // legacy — use isActive
-    isActive:     v.optional(v.string()), // "active" | "disabled" | "backup"
+    status:       v.optional(v.string()),
+    isActive:     v.optional(v.string()),
     capabilities: v.optional(v.array(v.string())),
     config:       v.optional(v.any()),
-    owner:        v.optional(v.id("userProfiles")),  // FK
-    // Personality files — kept for backward compat, workspaceFiles is source of truth
+    owner:        v.optional(v.id("userProfiles")),
     soulMd:       v.optional(v.string()),
     identityMd:   v.optional(v.string()),
     agentsMd:     v.optional(v.string()),
@@ -168,24 +166,22 @@ export default defineSchema({
     updatedAt:    v.number(),
     lastActiveAt: v.optional(v.number()),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_agentId",  ["agentId"])
     .index("by_owner",    ["owner"])
     .index("by_status",   ["status"])
     .index("by_isActive", ["isActive"]),
 
-
-
   // ══════════════════════════════════════════════════════
-  // AGENT DELEGATIONS (parent/child permissions)
-  // parentAgentId -> childAgentId, with scoped skill/tool allowlist
+  // AGENT DELEGATIONS (system table - no tenantId)
   // ══════════════════════════════════════════════════════
   agentDelegations: defineTable({
     parentAgentId: v.string(),
     childAgentId: v.string(),
-    relationType: v.optional(v.string()), // delegate|subagent|tool-proxy
+    relationType: v.optional(v.string()),
     allowedSkills: v.optional(v.array(v.string())),
     allowedTools: v.optional(v.array(v.string())),
-    status: v.optional(v.string()), // active|disabled
+    status: v.optional(v.string()),
     notes: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -196,23 +192,22 @@ export default defineSchema({
     .index("by_status", ["status"]),
 
   // ══════════════════════════════════════════════════════
-  // SESSIONS
-  // PK: _id | Ref'd by: messages, agentSessions
-  // FK: userId → userProfiles._id (optional)
-  // Ref: agentId (string → agents.agentId)
+  // SESSIONS [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   sessions: defineTable({
-    sessionKey:   v.string(),  // "agent:main:main" | "agent:main:whatsapp:..." etc.
-    agentId:      v.optional(v.string()),  // ref: agents.agentId
-    userId:       v.optional(v.id("userProfiles")),  // FK
-    channel:      v.optional(v.string()),  // whatsapp | telegram | webchat | discord
+    tenantId: v.optional(v.string()),
+    sessionKey:   v.string(),
+    agentId:      v.optional(v.string()),
+    userId:       v.optional(v.id("userProfiles")),
+    channel:      v.optional(v.string()),
     model:        v.optional(v.string()),
-    status:       v.optional(v.string()),  // "active" | "paused" | "ended"
-    messageCount: v.optional(v.number()), // denormalized counter (sync from messages)
+    status:       v.optional(v.string()),
+    messageCount: v.optional(v.number()),
     createdAt:    v.number(),
     lastActiveAt: v.number(),
     metadata:     v.optional(v.any()),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_sessionKey",    ["sessionKey"])
     .index("by_agent",         ["agentId"])
     .index("by_user",          ["userId"])
@@ -221,10 +216,7 @@ export default defineSchema({
     .index("by_agent_status",  ["agentId", "status"]),
 
   // ══════════════════════════════════════════════════════
-  // SESSION SUMMARIES (rolling context per session)
-  // PK: _id
-  // FK: sessionId → sessions._id
-  // Ref: agentId (string → agents.agentId)
+  // SESSION SUMMARIES (system table - no tenantId)
   // ══════════════════════════════════════════════════════
   sessionSummaries: defineTable({
     sessionId:       v.id("sessions"),
@@ -256,41 +248,36 @@ export default defineSchema({
     .index("by_agent", ["agentId"]),
 
   // ══════════════════════════════════════════════════════
-  // MESSAGES  (chat history)
-  // PK: _id
-  // FK: sessionId → sessions._id  ← proper FK
-  // Ref: agentId (string → agents.agentId)
+  // MESSAGES [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   messages: defineTable({
-    sessionId:  v.id("sessions"),  // FK ← was v.string(), now proper FK
-    agentId:    v.optional(v.string()),  // ref: agents.agentId
-    role:       v.string(),  // "user" | "assistant" | "system" | "tool"
+    tenantId: v.optional(v.string()),
+    sessionId:  v.id("sessions"),
+    agentId:    v.optional(v.string()),
+    role:       v.string(),
     content:    v.string(),
     timestamp:  v.number(),
-    externalId: v.optional(v.string()),  // message ID from channel (WhatsApp, Telegram, etc.)
+    externalId: v.optional(v.string()),
     tokenCount: v.optional(v.number()),
     metadata:   v.optional(v.any()),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_session",      ["sessionId"])
     .index("by_session_time", ["sessionId", "timestamp"])
     .index("by_session_role", ["sessionId", "role"])
     .index("by_agent",        ["agentId"]),
 
   // ══════════════════════════════════════════════════════
-  // AGENT SESSIONS  (detailed per-agent session tracking)
-  // PK: _id
-  // FK: convexSessionId → sessions._id (optional)
-  // FK: userId → userProfiles._id (optional)
-  // Ref: agentId (string → agents.agentId)
+  // AGENT SESSIONS (system table - no tenantId)
   // ══════════════════════════════════════════════════════
   agentSessions: defineTable({
-    sessionId:       v.string(),  // external UUID from OpenClaw JSONL
-    convexSessionId: v.optional(v.id("sessions")),  // FK → sessions._id
-    agentId:         v.string(),  // ref: agents.agentId
-    userId:          v.optional(v.id("userProfiles")),  // FK
+    sessionId:       v.string(),
+    convexSessionId: v.optional(v.id("sessions")),
+    agentId:         v.string(),
+    userId:          v.optional(v.id("userProfiles")),
     channel:         v.optional(v.string()),
     model:           v.optional(v.string()),
-    status:          v.string(),  // "active" | "paused" | "ended" | "error"
+    status:          v.string(),
     startedAt:       v.number(),
     endedAt:         v.optional(v.number()),
     messageCount:    v.optional(v.number()),
@@ -309,24 +296,23 @@ export default defineSchema({
     .index("by_agent_status",    ["agentId", "status"]),
 
   // ══════════════════════════════════════════════════════
-  // MEMORIES  (long-term agent memory)
-  // PK: _id
-  // FK: userId → userProfiles._id (optional)
-  // Ref: agentId (string → agents.agentId)
+  // MEMORIES [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   memories: defineTable({
-    agentId:        v.optional(v.string()),  // ref: agents.agentId
-    userId:         v.optional(v.id("userProfiles")),  // FK
-    category:       v.string(),  // "preference"|"fact"|"event"|"decision"|"lesson"
+    tenantId: v.optional(v.string()),
+    agentId:        v.optional(v.string()),
+    userId:         v.optional(v.id("userProfiles")),
+    category:       v.string(),
     key:            v.string(),
     value:          v.string(),
     context:        v.optional(v.string()),
-    importance:     v.optional(v.number()),  // 1–10
+    importance:     v.optional(v.number()),
     source:         v.optional(v.string()),
     createdAt:      v.number(),
     lastAccessedAt: v.optional(v.number()),
     accessCount:    v.optional(v.number()),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_agent",          ["agentId"])
     .index("by_user",           ["userId"])
     .index("by_user_category",  ["userId", "category"])
@@ -334,33 +320,32 @@ export default defineSchema({
     .index("by_key",            ["key"]),
 
   // ══════════════════════════════════════════════════════
-  // DAILY NOTES  (memory/YYYY-MM-DD.md equivalent)
-  // PK: _id
-  // FK: userId → userProfiles._id (optional)
-  // Ref: agentId (string → agents.agentId)
+  // DAILY NOTES [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   dailyNotes: defineTable({
-    date:      v.string(),  // "YYYY-MM-DD"
-    agentId:   v.optional(v.string()),  // ref: agents.agentId
-    userId:    v.optional(v.id("userProfiles")),  // FK
-    content:   v.string(),  // raw markdown
+    tenantId: v.optional(v.string()),
+    date:      v.string(),
+    agentId:   v.optional(v.string()),
+    userId:    v.optional(v.id("userProfiles")),
+    content:   v.string(),
     summary:   v.optional(v.string()),
     tags:      v.optional(v.array(v.string())),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_date",       ["date"])
     .index("by_agent",      ["agentId"])
     .index("by_user",       ["userId"])
     .index("by_agent_date", ["agentId", "date"]),
 
   // ══════════════════════════════════════════════════════
-  // HEARTBEAT TASKS
-  // Ref: agentId (string → agents.agentId)
+  // HEARTBEAT TASKS [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   heartbeatTasks: defineTable({
+    tenantId: v.optional(v.string()),
     taskId:      v.string(),
-    agentId:     v.optional(v.string()),  // ref: agents.agentId
+    agentId:     v.optional(v.string()),
     description: v.string(),
     schedule:    v.optional(v.string()),
     enabled:     v.boolean(),
@@ -371,35 +356,39 @@ export default defineSchema({
     createdAt:   v.number(),
     updatedAt:   v.number(),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_taskId",      ["taskId"])
     .index("by_agent",       ["agentId"])
     .index("by_enabled",     ["enabled"])
     .index("by_agent_enabled",["agentId", "enabled"]),
 
   // ══════════════════════════════════════════════════════
-  // PROJECTS
+  // PROJECTS [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   projects: defineTable({
+    tenantId: v.optional(v.string()),
     name:         v.string(),
     slug:         v.string(),
     description:  v.optional(v.string()),
     domain:       v.optional(v.string()),
-    type:         v.optional(v.string()),  // "web"|"api"|"fullstack"|"landing"
-    status:       v.string(),  // "active"|"paused"|"archived"|"building"
+    type:         v.optional(v.string()),
+    status:       v.string(),
     technologies: v.optional(v.array(v.string())),
     config:       v.optional(v.any()),
     createdAt:    v.number(),
     updatedAt:    v.number(),
     deployedAt:   v.optional(v.number()),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_slug",   ["slug"])
     .index("by_status", ["status"]),
 
   // ══════════════════════════════════════════════════════
-  // PROJECT DEFAULTS
+  // PROJECT DEFAULTS [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   projectDefaults: defineTable({
-    scope:              v.string(),  // "global"
+    tenantId: v.optional(v.string()),
+    scope:              v.string(),
     basePath:           v.string(),
     projectRootPattern: v.string(),
     structure: v.object({
@@ -432,15 +421,16 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_scope", ["scope"]),
 
   // ══════════════════════════════════════════════════════
-  // NOTIFICATIONS
-  // FK: userId → userProfiles._id
+  // NOTIFICATIONS [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   notifications: defineTable({
-    userId:    v.id("userProfiles"),  // FK
-    type:      v.string(),  // "info"|"warning"|"error"|"success"
+    tenantId: v.optional(v.string()),
+    userId:    v.id("userProfiles"),
+    type:      v.string(),
     title:     v.string(),
     message:   v.string(),
     read:      v.boolean(),
@@ -448,33 +438,33 @@ export default defineSchema({
     createdAt: v.number(),
     readAt:    v.optional(v.number()),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_user",      ["userId"])
     .index("by_user_read", ["userId", "read"])
     .index("by_user_time", ["userId", "createdAt"]),
 
   // ══════════════════════════════════════════════════════
-  // WORKSPACE FILES
-  // PK: _id | Ref'd by: fileVersions
-  // FK: ownerId → userProfiles._id (optional)
-  // Ref: agentId (string → agents.agentId)
+  // WORKSPACE FILES [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   workspaceFiles: defineTable({
-    path:         v.string(),  // "SOUL.md" | "memory/2026-02-28.md" | etc.
-    fileType:     v.string(),  // "md"|"json"|"txt"|"yaml"
-    category:     v.string(),  // "agent"|"memory"|"user"|"project"|"config"
-    agentId:      v.optional(v.string()),  // ref: agents.agentId
-    ownerId:      v.optional(v.id("userProfiles")),  // FK
+    tenantId: v.optional(v.string()),
+    path:         v.string(),
+    fileType:     v.string(),
+    category:     v.string(),
+    agentId:      v.optional(v.string()),
+    ownerId:      v.optional(v.id("userProfiles")),
     content:      v.string(),
     parsedData:   v.optional(v.any()),
     version:      v.number(),
     description:  v.optional(v.string()),
     tags:         v.optional(v.array(v.string())),
     isTemplate:   v.optional(v.boolean()),
-    syncStatus:   v.optional(v.string()),  // "synced"|"pending"|"conflict"
+    syncStatus:   v.optional(v.string()),
     lastSyncedAt: v.optional(v.number()),
     createdAt:    v.number(),
     updatedAt:    v.number(),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_path",           ["path"])
     .index("by_agent",          ["agentId"])
     .index("by_owner",          ["ownerId"])
@@ -484,22 +474,18 @@ export default defineSchema({
     .index("by_isTemplate",     ["isTemplate"]),
 
   // ══════════════════════════════════════════════════════
-  // WORKSPACE TREES
-  // PK: _id
-  // FK: ownerId  → userProfiles._id (optional)
-  // FK: parentId → workspaceTrees._id (optional, self-ref)
-  // Ref: agentId (string → agents.agentId)
+  // WORKSPACE TREES (system table - no tenantId)
   // ══════════════════════════════════════════════════════
   workspaceTrees: defineTable({
     rootPath:    v.string(),
-    agentId:     v.optional(v.string()),  // ref: agents.agentId
-    ownerId:     v.optional(v.id("userProfiles")),   // FK
-    parentId:    v.optional(v.id("workspaceTrees")), // FK (self-ref)
+    agentId:     v.optional(v.string()),
+    ownerId:     v.optional(v.id("userProfiles")),
+    parentId:    v.optional(v.id("workspaceTrees")),
     name:        v.string(),
     description: v.optional(v.string()),
-    type:        v.string(),  // "root"|"user"|"project"|"shared"
+    type:        v.string(),
     fileCount:   v.optional(v.number()),
-    status:      v.string(),  // "active"|"archived"|"deleted"
+    status:      v.string(),
     createdAt:   v.number(),
     updatedAt:   v.number(),
   })
@@ -510,32 +496,28 @@ export default defineSchema({
     .index("by_agent",    ["agentId"]),
 
   // ══════════════════════════════════════════════════════
-  // FILE VERSIONS  (version history for workspaceFiles)
-  // PK: _id
-  // FK: fileId    → workspaceFiles._id
-  // FK: changedBy → userProfiles._id (optional)
+  // FILE VERSIONS [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   fileVersions: defineTable({
-    fileId:        v.id("workspaceFiles"),  // FK
+    tenantId: v.optional(v.string()),
+    fileId:        v.id("workspaceFiles"),
     version:       v.number(),
     content:       v.string(),
-    changedBy:     v.optional(v.id("userProfiles")),  // FK
+    changedBy:     v.optional(v.id("userProfiles")),
     changeSummary: v.optional(v.string()),
     timestamp:     v.number(),
   })
+    .index("by_tenant", ["tenantId"])
     .index("by_file",         ["fileId"])
     .index("by_file_version", ["fileId", "version"])
     .index("by_file_time",    ["fileId", "timestamp"]),
 
   // ══════════════════════════════════════════════════════
-  // VECTOR MEMORY CHUNKS (session memory context / semantic retrieval)
-  // FK: sessionId -> sessions._id (optional)
-  // FK: ownerId   -> userProfiles._id (optional)
-  // Ref: agentId  -> agents.agentId
+  // VECTOR MEMORY CHUNKS (system table - no tenantId)
   // ══════════════════════════════════════════════════════
   vectorChunks: defineTable({
-    kind:       v.string(), // session_message | daily_note | memory | custom
-    sourceId:   v.string(), // external unique id (e.g., message externalId)
+    kind:       v.string(),
+    sourceId:   v.string(),
     sessionId:  v.optional(v.id("sessions")),
     ownerId:    v.optional(v.id("userProfiles")),
     agentId:    v.optional(v.string()),
@@ -554,7 +536,7 @@ export default defineSchema({
     .index("by_kind_session", ["kind", "sessionId"]),
 
   // ══════════════════════════════════════════════════════
-  // TENANT CRUD TEST (for local OpenClaw integration validation)
+  // TENANT CRUD ITEMS [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   tenantCrudItems: defineTable({
     tenantId: v.string(),
@@ -571,8 +553,7 @@ export default defineSchema({
     .index("by_tenant_deleted", ["tenantId", "deletedAt"]),
 
   // ══════════════════════════════════════════════════════
-  // LEGACY — kept for backward compat, NOT source of truth
-  // Use workspaceFiles + agents instead of these
+  // LEGACY (system tables - no tenantId)
   // ══════════════════════════════════════════════════════
   agentIdentity: defineTable({
     agentId:         v.string(),
