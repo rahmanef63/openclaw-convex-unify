@@ -5,6 +5,19 @@ function now() {
   return Date.now();
 }
 
+async function getInstanceTenantId(ctx: any): Promise<string | null> {
+  const config = await ctx.db.query("instanceConfig").first();
+  return config?.tenantId ?? null;
+}
+
+function enforceTenant(argsTenantId: string, instanceTenantId: string | null) {
+  // Development mode: allow all if instance tenant not configured
+  if (!instanceTenantId) return;
+  if (argsTenantId !== instanceTenantId) {
+    throw new Error("FORBIDDEN: tenant mismatch");
+  }
+}
+
 export const createItem = mutation({
   args: {
     tenantId: v.string(),
@@ -14,6 +27,9 @@ export const createItem = mutation({
     createdBy: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const instanceTenantId = await getInstanceTenantId(ctx);
+    enforceTenant(args.tenantId, instanceTenantId);
+
     const existing = await ctx.db
       .query("tenantCrudItems")
       .withIndex("by_tenant_key", (q) => q.eq("tenantId", args.tenantId).eq("key", args.key))
@@ -52,6 +68,9 @@ export const createItem = mutation({
 export const getItem = query({
   args: { tenantId: v.string(), key: v.string() },
   handler: async (ctx, args) => {
+    const instanceTenantId = await getInstanceTenantId(ctx);
+    enforceTenant(args.tenantId, instanceTenantId);
+
     const row = await ctx.db
       .query("tenantCrudItems")
       .withIndex("by_tenant_key", (q) => q.eq("tenantId", args.tenantId).eq("key", args.key))
@@ -65,6 +84,9 @@ export const getItem = query({
 export const listItems = query({
   args: { tenantId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    const instanceTenantId = await getInstanceTenantId(ctx);
+    enforceTenant(args.tenantId, instanceTenantId);
+
     const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
     const rows = await ctx.db
       .query("tenantCrudItems")
@@ -83,6 +105,9 @@ export const updateItem = mutation({
     metadata: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
+    const instanceTenantId = await getInstanceTenantId(ctx);
+    enforceTenant(args.tenantId, instanceTenantId);
+
     const row = await ctx.db
       .query("tenantCrudItems")
       .withIndex("by_tenant_key", (q) => q.eq("tenantId", args.tenantId).eq("key", args.key))
@@ -103,6 +128,9 @@ export const updateItem = mutation({
 export const deleteItem = mutation({
   args: { tenantId: v.string(), key: v.string() },
   handler: async (ctx, args) => {
+    const instanceTenantId = await getInstanceTenantId(ctx);
+    enforceTenant(args.tenantId, instanceTenantId);
+
     const row = await ctx.db
       .query("tenantCrudItems")
       .withIndex("by_tenant_key", (q) => q.eq("tenantId", args.tenantId).eq("key", args.key))

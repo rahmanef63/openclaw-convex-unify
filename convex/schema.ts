@@ -24,6 +24,18 @@ import { v } from "convex/values";
 export default defineSchema({
 
   // ══════════════════════════════════════════════════════
+  // INSTANCE CONFIG (per-deployment tenant context)
+  // Stores tenant context when env vars not accessible in Convex
+  // ══════════════════════════════════════════════════════
+  instanceConfig: defineTable({
+    tenantId: v.string(),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_tenant", ["tenantId"]),
+
+  // ══════════════════════════════════════════════════════
   // USER PROFILES
   // PK: _id | Ref'd by: sessions, memories, workspaceFiles,
   //          dailyNotes, notifications, userRoles, agents(owner)
