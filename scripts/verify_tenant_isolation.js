@@ -44,8 +44,35 @@ checks.push({
   expect: 'FORBIDDEN'
 });
 
+// 5) legacy paths disabled (strict-only)
+checks.push({
+  module: 'sessions',
+  check: 'legacy upsert disabled',
+  result: run("npx convex run sessions:upsert '{\"sessionKey\":\"legacy-test\"}'"),
+  expect: 'LEGACY_PATH_DISABLED'
+});
+checks.push({
+  module: 'workspace',
+  check: 'legacy saveFile disabled',
+  result: run("npx convex run workspace:saveFile '{\"path\":\"/tmp/x.md\",\"fileType\":\"md\",\"category\":\"test\",\"content\":\"x\"}'"),
+  expect: 'LEGACY_PATH_DISABLED'
+});
+checks.push({
+  module: 'agents',
+  check: 'legacy registerAgent disabled',
+  result: run("npx convex run agents:registerAgent '{\"agentId\":\"legacy\",\"name\":\"legacy\"}'"),
+  expect: 'LEGACY_PATH_DISABLED'
+});
+checks.push({
+  module: 'memories',
+  check: 'legacy save disabled',
+  result: run("npx convex run memories:save '{\"category\":\"fact\",\"key\":\"k\",\"value\":\"v\"}'"),
+  expect: 'LEGACY_PATH_DISABLED'
+});
+
 function verdict(c) {
   if (c.expect === 'FORBIDDEN') return !c.result.ok && /FORBIDDEN/i.test(c.result.out);
+  if (c.expect === 'LEGACY_PATH_DISABLED') return !c.result.ok && /LEGACY_PATH_DISABLED/i.test(c.result.out);
   return c.result.ok;
 }
 

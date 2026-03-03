@@ -10,6 +10,12 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireTenant } from "./tenantGuard";
 
+const LEGACY_DISABLED = "LEGACY_PATH_DISABLED: use scoped API with tenantId";
+
+function legacyDisabled(path: string): never {
+  throw new Error(`${LEGACY_DISABLED} (${path})`);
+}
+
 function hashEmbedding(text: string, dims = 128): number[] {
   const vec = new Array(dims).fill(0) as number[];
   const tokens = text.toLowerCase().split(/\s+/).filter(Boolean);
@@ -41,7 +47,8 @@ export const upsert = mutation({
     model:      v.optional(v.string()),
     metadata:   v.optional(v.any()),
   },
-  handler: async (ctx, args) => {
+  handler: async (_ctx, _args) => {
+    legacyDisabled("sessions.upsert");
     const now = Date.now();
     const existing = await ctx.db
       .query("sessions")
@@ -86,7 +93,8 @@ export const create = mutation({
     model:      v.optional(v.string()),
     metadata:   v.optional(v.any()),
   },
-  handler: async (ctx, args) => {
+  handler: async (_ctx, _args) => {
+    legacyDisabled("sessions.create");
     const now = Date.now();
     const existing = await ctx.db
       .query("sessions")
@@ -260,7 +268,8 @@ export const logMessage = mutation({
     tokenCount: v.optional(v.number()),
     metadata:   v.optional(v.any()),
   },
-  handler: async (ctx, args) => {
+  handler: async (_ctx, _args) => {
+    legacyDisabled("sessions.logMessage");
     const now = Date.now();
     const id = await ctx.db.insert("messages", {
       sessionId:  args.sessionId,
@@ -322,7 +331,8 @@ export const batchLogMessages = mutation({
       metadata:   v.optional(v.any()),
     })),
   },
-  handler: async (ctx, args) => {
+  handler: async (_ctx, _args) => {
+    legacyDisabled("sessions.batchLogMessages");
     let count = 0;
     for (const msg of args.messages) {
       const mid = await ctx.db.insert("messages", {

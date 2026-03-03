@@ -9,6 +9,11 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireTenant } from "./tenantGuard";
 
+const LEGACY_DISABLED = "LEGACY_PATH_DISABLED: use scoped API with tenantId";
+const legacyDisabled = (path: string): never => {
+  throw new Error(`${LEGACY_DISABLED} (${path})`);
+};
+
 /** Simpan memory baru. */
 export const save = mutation({
   args: {
@@ -22,6 +27,7 @@ export const save = mutation({
     source:     v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("memories.save");
     const now = Date.now();
     const id = await ctx.db.insert("memories", {
       ...args,
@@ -45,6 +51,7 @@ export const upsert = mutation({
     source:     v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("memories.upsert");
     const now = Date.now();
     // Cari existing by key (dan agentId jika ada)
     const existing = await ctx.db
@@ -83,6 +90,7 @@ export const getByCategory = query({
     category: v.string(),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("memories.getByCategory");
     if (args.agentId) {
       return ctx.db
         .query("memories")

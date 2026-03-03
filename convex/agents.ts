@@ -4,6 +4,11 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireTenant } from "./tenantGuard";
 
+const LEGACY_DISABLED = "LEGACY_PATH_DISABLED: use scoped API with tenantId";
+const legacyDisabled = (path: string): never => {
+  throw new Error(`${LEGACY_DISABLED} (${path})`);
+};
+
 // ============================================
 // AGENT MANAGEMENT
 // ============================================
@@ -29,44 +34,16 @@ export const registerAgent = mutation({
     bootstrapMd: v.optional(v.string()),
     memoryMd: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
-    const existing = await ctx.db
-      .query("agents")
-      .withIndex("by_agentId", (q) => q.eq("agentId", args.agentId))
-      .first();
-    
-    const now = Date.now();
-    
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        ...args,
-        updatedAt: now,
-        lastActiveAt: now,
-      });
-      return await ctx.db.get(existing._id);
-    } else {
-      const id = await ctx.db.insert("agents", {
-        ...args,
-        type: args.type || "main",
-        status: args.status || "active",
-        isActive: args.isActive || "active",
-        createdAt: now,
-        updatedAt: now,
-        lastActiveAt: now,
-      });
-      return await ctx.db.get(id);
-    }
+  handler: async () => {
+    legacyDisabled("agents.registerAgent");
   },
 });
 
 // Get agent by ID
 export const getAgent = query({
   args: { agentId: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.db
-      .query("agents")
-      .withIndex("by_agentId", (q) => q.eq("agentId", args.agentId))
-      .first();
+  handler: async () => {
+    legacyDisabled("agents.getAgent");
   },
 });
 
@@ -77,6 +54,7 @@ export const getAllAgents = query({
     owner: v.optional(v.id("userProfiles")),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("agents.getAllAgents");
     let query = ctx.db.query("agents");
     
     if (args.owner) {
@@ -100,6 +78,7 @@ export const updateStatus = mutation({
     status: v.string(),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("agents.updateStatus");
     const agent = await ctx.db
       .query("agents")
       .withIndex("by_agentId", (q) => q.eq("agentId", args.agentId))
@@ -131,6 +110,7 @@ export const startSession = mutation({
     model: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("agents.startSession");
     const now = Date.now();
     
     // Check if session already exists
@@ -175,6 +155,7 @@ export const endSession = mutation({
     })),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("agents.endSession");
     const session = await ctx.db
       .query("agentSessions")
       .withIndex("by_sessionId", (q) => q.eq("sessionId", args.sessionId))
@@ -197,6 +178,7 @@ export const endSession = mutation({
 export const incrementMessageCount = mutation({
   args: { sessionId: v.string() },
   handler: async (ctx, args) => {
+    legacyDisabled("agents.incrementMessageCount");
     const session = await ctx.db
       .query("agentSessions")
       .withIndex("by_sessionId", (q) => q.eq("sessionId", args.sessionId))
@@ -220,6 +202,7 @@ export const getActiveSessions = query({
     userId: v.optional(v.id("userProfiles")),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("agents.getActiveSessions");
     let query = ctx.db
       .query("agentSessions")
       .withIndex("by_status", (q) => q.eq("status", "active"));
@@ -243,6 +226,7 @@ export const getSessionHistory = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("agents.getSessionHistory");
     let query = ctx.db.query("agentSessions");
     
     if (args.agentId) {

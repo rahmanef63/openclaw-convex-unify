@@ -4,6 +4,11 @@ import { mutation, query, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requireTenant } from "./tenantGuard";
 
+const LEGACY_DISABLED = "LEGACY_PATH_DISABLED: use scoped API with tenantId";
+const legacyDisabled = (path: string): never => {
+  throw new Error(`${LEGACY_DISABLED} (${path})`);
+};
+
 async function findWorkspaceForPath(ctx: { db: any }, path: string) {
   const trees = await ctx.db.query("workspaceTrees").collect();
   let best = null;
@@ -55,6 +60,7 @@ export const saveFile = mutation({
     parsedData: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.saveFile");
     const existing = await ctx.db
       .query("workspaceFiles")
       .withIndex("by_path", (q) => q.eq("path", args.path))
@@ -118,6 +124,7 @@ export const getFile = query({
     agentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    legacyDisabled("workspace.getFile");
     if (!args.ownerId && !args.agentId) {
       throw new Error("Scope required: provide ownerId or agentId");
     }
