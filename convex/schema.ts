@@ -513,9 +513,10 @@ export default defineSchema({
     .index("by_file_time",    ["fileId", "timestamp"]),
 
   // ══════════════════════════════════════════════════════
-  // VECTOR MEMORY CHUNKS (system table - no tenantId)
+  // VECTOR MEMORY CHUNKS [TENANT-BOUND]
   // ══════════════════════════════════════════════════════
   vectorChunks: defineTable({
+    tenantId:   v.optional(v.string()),
     kind:       v.string(),
     sourceId:   v.string(),
     sessionId:  v.optional(v.id("sessions")),
@@ -528,6 +529,9 @@ export default defineSchema({
     createdAt:  v.number(),
     updatedAt:  v.number(),
   })
+    .index("by_tenant", ["tenantId"])
+    .index("by_tenant_agent", ["tenantId", "agentId"])
+    .index("by_tenant_session", ["tenantId", "sessionId"])
     .index("by_kind", ["kind"])
     .index("by_source", ["sourceId"])
     .index("by_session", ["sessionId"])
@@ -551,6 +555,29 @@ export default defineSchema({
     .index("by_tenant", ["tenantId"])
     .index("by_tenant_key", ["tenantId", "key"])
     .index("by_tenant_deleted", ["tenantId", "deletedAt"]),
+
+  // ══════════════════════════════════════════════════════
+  // TASKS [TENANT-BOUND]
+  // ══════════════════════════════════════════════════════
+  tasks: defineTable({
+    tenantId: v.optional(v.string()),
+    agentId: v.optional(v.string()),
+    sessionId: v.optional(v.id("sessions")),
+    userId: v.optional(v.id("userProfiles")),
+    title: v.string(),
+    status: v.string(), // todo|in_progress|blocked|done
+    priority: v.optional(v.string()), // low|normal|high
+    payload: v.optional(v.any()),
+    result: v.optional(v.any()),
+    dueAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_tenant", ["tenantId"])
+    .index("by_tenant_status", ["tenantId", "status"])
+    .index("by_agent", ["agentId"])
+    .index("by_session", ["sessionId"])
+    .index("by_user", ["userId"]),
 
   // ══════════════════════════════════════════════════════
   // LEGACY (system tables - no tenantId)

@@ -34,23 +34,38 @@ function hashEmbedding(text: string, dims = 128): number[] {
   return vec.map((x) => x / norm);
 }
 
+async function getInstanceTenantId(ctx: any): Promise<string | null> {
+  const config = await ctx.db.query("instanceConfig").first();
+  return config?.tenantId ?? null;
+}
+
+function enforceTenant(requestedTenantId: string, instanceTenantId: string | null) {
+  if (!instanceTenantId) return; // development mode
+  if (requestedTenantId !== instanceTenantId) {
+    throw new Error("FORBIDDEN: tenant mismatch");
+  }
+}
+
 export const upsertChunk = mutation({
   args: {
+    tenantId: v.string(),
     kind: v.string(),
     sourceId: v.string(),
     sessionId: v.optional(v.id("sessions")),
     ownerId: v.optional(v.id("userProfiles")),
-    agentId: v.optional(v.string()),
+    agentId: v.string(),
     text: v.string(),
     embedding: v.array(v.float64()),
     metadata: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
+    const instanceTenantId = await getInstanceTenantId(ctx);
+    enforceTenant(args.tenantId, instanceTenantId);
     const now = Date.now();
-    const existing = await ctx.db
+    const existing = (await ctx.db
       .query("vectorChunks")
       .withIndex("by_source", (q) => q.eq("sourceId", args.sourceId))
-      .first();
+      .collect()).find((r) => r.tenantId === args.tenantId);
 
     if (existing) {
       await ctx.db.patch(existing._id, {
@@ -73,11 +88,12 @@ export const upsertChunk = mutation({
 export const bulkUpsertChunks = mutation({
   args: {
     chunks: v.array(v.object({
+      tenantId: v.string(),
       kind: v.string(),
       sourceId: v.string(),
       sessionId: v.optional(v.id("sessions")),
       ownerId: v.optional(v.id("userProfiles")),
-      agentId: v.optional(v.string()),
+      agentId: v.string(),
       text: v.string(),
       embedding: v.array(v.float64()),
       metadata: v.optional(v.any()),
@@ -86,10 +102,12 @@ export const bulkUpsertChunks = mutation({
   handler: async (ctx, args) => {
     let count = 0;
     for (const c of args.chunks) {
-      const existing = await ctx.db
+      const instanceTenantId = await getInstanceTenantId(ctx);
+      enforceTenant(c.tenantId, instanceTenantId);
+      const existing = (await ctx.db
         .query("vectorChunks")
         .withIndex("by_source", (q) => q.eq("sourceId", c.sourceId))
-        .first();
+        .collect()).find((r) => r.tenantId === c.tenantId);
       const now = Date.now();
       if (existing) {
         await ctx.db.patch(existing._id, {
@@ -113,25 +131,29 @@ export const bulkUpsertChunks = mutation({
 
 export const search = query({
   args: {
+    tenantId: v.string(),
+    agentId: v.string(),
     queryEmbedding: v.array(v.float64()),
     topK: v.optional(v.number()),
     minScore: v.optional(v.float64()),
     kind: v.optional(v.string()),
     sessionId: v.optional(v.id("sessions")),
     ownerId: v.optional(v.id("userProfiles")),
-    agentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const instanceTenantId = await getInstanceTenantId(ctx);
+    enforceTenant(args.tenantId, instanceTenantId);
     const topK = args.topK ?? 8;
     const minScore = args.minScore ?? 0.2;
 
-    let items = args.kind
-      ? await ctx.db.query("vectorChunks").withIndex("by_kind", (q) => q.eq("kind", args.kind!)).collect()
-      : await ctx.db.query("vectorChunks").collect();
+    let items = await ctx.db
+      .query("vectorChunks")
+      .withIndex("by_tenant_agent", (q) => q.eq("tenantId", args.tenantId).eq("agentId", args.agentId))
+      .collect();
 
+    if (args.kind) items = items.filter((i) => i.kind === args.kind);
     if (args.sessionId) items = items.filter((i) => i.sessionId === args.sessionId);
     if (args.ownerId) items = items.filter((i) => i.ownerId === args.ownerId);
-    if (args.agentId) items = items.filter((i) => i.agentId === args.agentId);
 
     const scored = items
       .map((i) => ({ ...i, score: cosineSimilarity(args.queryEmbedding, i.embedding) }))
@@ -146,26 +168,30 @@ export const search = query({
 // text query helper (hash embedding)
 export const searchByText = query({
   args: {
+    tenantId: v.string(),
+    agentId: v.string(),
     queryText: v.string(),
     topK: v.optional(v.number()),
     minScore: v.optional(v.float64()),
     kind: v.optional(v.string()),
     sessionId: v.optional(v.id("sessions")),
     ownerId: v.optional(v.id("userProfiles")),
-    agentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const instanceTenantId = await getInstanceTenantId(ctx);
+    enforceTenant(args.tenantId, instanceTenantId);
     const emb = hashEmbedding(args.queryText);
     const topK = args.topK ?? 8;
     const minScore = args.minScore ?? 0.2;
 
-    let items = args.kind
-      ? await ctx.db.query("vectorChunks").withIndex("by_kind", (q) => q.eq("kind", args.kind!)).collect()
-      : await ctx.db.query("vectorChunks").collect();
+    let items = await ctx.db
+      .query("vectorChunks")
+      .withIndex("by_tenant_agent", (q) => q.eq("tenantId", args.tenantId).eq("agentId", args.agentId))
+      .collect();
 
+    if (args.kind) items = items.filter((i) => i.kind === args.kind);
     if (args.sessionId) items = items.filter((i) => i.sessionId === args.sessionId);
     if (args.ownerId) items = items.filter((i) => i.ownerId === args.ownerId);
-    if (args.agentId) items = items.filter((i) => i.agentId === args.agentId);
 
     return items
       .map((i) => ({ ...i, score: cosineSimilarity(emb, i.embedding) }))
@@ -178,6 +204,8 @@ export const searchByText = query({
 // FINAL STAGE #1: build context endpoint for current session
 export const buildContextForSession = query({
   args: {
+    tenantId: v.string(),
+    agentId: v.string(),
     sessionKey: v.string(),
     queryText: v.string(),
     topK: v.optional(v.number()),
@@ -185,21 +213,26 @@ export const buildContextForSession = query({
     maxChars: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const instanceTenantId = await getInstanceTenantId(ctx);
+    enforceTenant(args.tenantId, instanceTenantId);
     const session = await ctx.db
       .query("sessions")
       .withIndex("by_sessionKey", (q) => q.eq("sessionKey", args.sessionKey))
       .first();
     if (!session) return { sessionFound: false, snippets: [], contextText: "" };
+    if (session.tenantId !== args.tenantId || session.agentId !== args.agentId) {
+      throw new Error("FORBIDDEN: session scope mismatch");
+    }
 
     const emb = hashEmbedding(args.queryText);
     const topK = args.topK ?? 8;
     const minScore = args.minScore ?? 0.2;
     const maxChars = args.maxChars ?? 3000;
 
-    const items = await ctx.db
+    const items = (await ctx.db
       .query("vectorChunks")
-      .withIndex("by_session", (q) => q.eq("sessionId", session._id))
-      .collect();
+      .withIndex("by_tenant_session", (q) => q.eq("tenantId", args.tenantId).eq("sessionId", session._id))
+      .collect()).filter((i) => i.agentId === args.agentId);
 
     const hits = items
       .map((i) => ({ ...i, score: cosineSimilarity(emb, i.embedding) }))
@@ -232,18 +265,23 @@ export const buildContextForSession = query({
 
 export const count = query({
   args: {
+    tenantId: v.string(),
+    agentId: v.string(),
     kind: v.optional(v.string()),
     sessionId: v.optional(v.id("sessions")),
     ownerId: v.optional(v.id("userProfiles")),
-    agentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    let items = args.kind
-      ? await ctx.db.query("vectorChunks").withIndex("by_kind", (q) => q.eq("kind", args.kind!)).collect()
-      : await ctx.db.query("vectorChunks").collect();
+    const instanceTenantId = await getInstanceTenantId(ctx);
+    enforceTenant(args.tenantId, instanceTenantId);
+
+    let items = await ctx.db
+      .query("vectorChunks")
+      .withIndex("by_tenant_agent", (q) => q.eq("tenantId", args.tenantId).eq("agentId", args.agentId))
+      .collect();
+    if (args.kind) items = items.filter((i) => i.kind === args.kind);
     if (args.sessionId) items = items.filter((i) => i.sessionId === args.sessionId);
     if (args.ownerId) items = items.filter((i) => i.ownerId === args.ownerId);
-    if (args.agentId) items = items.filter((i) => i.agentId === args.agentId);
     return items.length;
   },
 });
@@ -282,11 +320,12 @@ export const embedTextOpenAI = action({
 
 export const embedAndUpsertChunkOpenAI = action({
   args: {
+    tenantId: v.string(),
     kind: v.string(),
     sourceId: v.string(),
     sessionId: v.optional(v.id("sessions")),
     ownerId: v.optional(v.id("userProfiles")),
-    agentId: v.optional(v.string()),
+    agentId: v.string(),
     text: v.string(),
     metadata: v.optional(v.any()),
     model: v.optional(v.string()),
@@ -297,6 +336,7 @@ export const embedAndUpsertChunkOpenAI = action({
       model: args.model,
     });
     const id = await ctx.runMutation(api.vectors.upsertChunk, {
+      tenantId: args.tenantId,
       kind: args.kind,
       sourceId: args.sourceId,
       sessionId: args.sessionId,
