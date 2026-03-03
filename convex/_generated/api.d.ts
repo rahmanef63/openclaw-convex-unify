@@ -12,6 +12,7 @@ import type * as admin from "../admin.js";
 import type * as agentDelegations from "../agentDelegations.js";
 import type * as agentIdentity from "../agentIdentity.js";
 import type * as agents from "../agents.js";
+import type * as backfill from "../backfill.js";
 import type * as contextBuilder from "../contextBuilder.js";
 import type * as dailyNotes from "../dailyNotes.js";
 import type * as heartbeatTasks from "../heartbeatTasks.js";
@@ -43,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   agentDelegations: typeof agentDelegations;
   agentIdentity: typeof agentIdentity;
   agents: typeof agents;
+  backfill: typeof backfill;
   contextBuilder: typeof contextBuilder;
   dailyNotes: typeof dailyNotes;
   heartbeatTasks: typeof heartbeatTasks;

@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 
 const TENANT_TABLES = [
   "userProfiles",
@@ -39,6 +40,7 @@ export const listTables = query({
   handler: async () => TENANT_TABLES,
 });
 
+// legacy windowed mode (kept for compatibility)
 export const tableDryRun = query({
   args: {
     table: v.string(),
@@ -106,6 +108,71 @@ export const tableApplyBatch = mutation({
       truncated,
       scanLimit,
       maxUpdates,
+    };
+  },
+});
+
+// exact paginated mode
+export const tableDryRunPage = query({
+  args: {
+    table: v.string(),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    assertTable(args.table);
+    const page = await ctx.db.query(args.table as any).paginate(args.paginationOpts);
+    const rows = page.page as any[];
+    const nullBefore = rows.filter((r) => hasNullTenant(r)).length;
+    return {
+      table: args.table,
+      scanned: rows.length,
+      null_before: nullBefore,
+      isDone: page.isDone,
+      continueCursor: page.continueCursor,
+    };
+  },
+});
+
+export const tableApplyPage = mutation({
+  args: {
+    table: v.string(),
+    tenantId: v.string(),
+    paginationOpts: paginationOptsValidator,
+    maxUpdates: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    assertTable(args.table);
+    const page = await ctx.db.query(args.table as any).paginate(args.paginationOpts);
+    const rows = page.page as any[];
+    const maxUpdates = Math.max(1, Math.min(args.maxUpdates ?? rows.length, 5000));
+
+    let scanned = rows.length;
+    let nullBefore = 0;
+    let updated = 0;
+    let errors = 0;
+
+    for (const row of rows) {
+      if (!hasNullTenant(row)) continue;
+      nullBefore++;
+      if (updated >= maxUpdates) continue;
+      try {
+        await ctx.db.patch(row._id, { tenantId: args.tenantId });
+        updated++;
+      } catch {
+        errors++;
+        break;
+      }
+    }
+
+    return {
+      table: args.table,
+      scanned,
+      null_before: nullBefore,
+      updated,
+      null_after: Math.max(0, nullBefore - updated),
+      errors,
+      isDone: page.isDone,
+      continueCursor: page.continueCursor,
     };
   },
 });
