@@ -215,7 +215,8 @@ async function processExactTable(table, state) {
 }
 
 async function main() {
-  const tables = runCli('backfill:listTables', {});
+  const allTables = runCli('backfill:listTables', {});
+  const tables = tableFilter ? allTables.filter((t) => tableFilter.has(t)) : allTables;
   const state = readState();
   printHeader(isDryRun ? 'dry-run' : 'apply');
 
@@ -274,3 +275,4 @@ async function main() {
 }
 
 main().catch((e) => { console.error(String(e)); process.exit(1); });
+
