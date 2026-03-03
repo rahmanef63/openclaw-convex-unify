@@ -2,6 +2,7 @@
 
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireTenant } from "./tenantGuard";
 
 // ============================================
 // AGENT MANAGEMENT
@@ -289,5 +290,45 @@ export const getAgentStats = query({
       totalMessages,
       totalTokens,
     };
+  },
+});
+
+// Tenant-guarded agent registration (recommended path)
+export const registerAgentScoped = mutation({
+  args: {
+    tenantId: v.string(),
+    agentId: v.string(),
+    name: v.string(),
+    type: v.optional(v.string()),
+    model: v.optional(v.string()),
+    capabilities: v.optional(v.array(v.string())),
+    config: v.optional(v.any()),
+    owner: v.optional(v.id("userProfiles")),
+    status: v.optional(v.string()),
+    isActive: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const tenantId = await requireTenant(ctx, args.tenantId);
+    const existing = await ctx.db
+      .query("agents")
+      .withIndex("by_agentId", (q) => q.eq("agentId", args.agentId))
+      .first();
+
+    const now = Date.now();
+    if (existing) {
+      await ctx.db.patch(existing._id, { ...args, tenantId, updatedAt: now, lastActiveAt: now });
+      return await ctx.db.get(existing._id);
+    }
+    const id = await ctx.db.insert("agents", {
+      ...args,
+      tenantId,
+      type: args.type || "main",
+      status: args.status || "active",
+      isActive: args.isActive || "active",
+      createdAt: now,
+      updatedAt: now,
+      lastActiveAt: now,
+    });
+    return await ctx.db.get(id);
   },
 });

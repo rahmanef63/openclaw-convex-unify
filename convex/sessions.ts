@@ -8,6 +8,7 @@
 
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireTenant } from "./tenantGuard";
 
 function hashEmbedding(text: string, dims = 128): number[] {
   const vec = new Array(dims).fill(0) as number[];
@@ -192,6 +193,55 @@ export const getAllStats = query({
       createdAt:    s.createdAt,
       lastActiveAt: s.lastActiveAt,
     }));
+  },
+});
+
+// Tenant-guarded session upsert (recommended path)
+export const upsertScoped = mutation({
+  args: {
+    tenantId: v.string(),
+    sessionKey: v.string(),
+    agentId: v.optional(v.string()),
+    userId: v.optional(v.id("userProfiles")),
+    channel: v.optional(v.string()),
+    model: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    const tenantId = await requireTenant(ctx, args.tenantId);
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("sessions")
+      .withIndex("by_sessionKey", (q) => q.eq("sessionKey", args.sessionKey))
+      .first();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        tenantId,
+        lastActiveAt: now,
+        status: "active",
+        ...(args.agentId !== undefined && { agentId: args.agentId }),
+        ...(args.userId !== undefined && { userId: args.userId }),
+        ...(args.channel !== undefined && { channel: args.channel }),
+        ...(args.model !== undefined && { model: args.model }),
+        ...(args.metadata !== undefined && { metadata: args.metadata }),
+      });
+      return existing._id;
+    }
+
+    return await ctx.db.insert("sessions", {
+      tenantId,
+      sessionKey: args.sessionKey,
+      agentId: args.agentId,
+      userId: args.userId,
+      channel: args.channel,
+      model: args.model,
+      status: "active",
+      messageCount: 0,
+      createdAt: now,
+      lastActiveAt: now,
+      metadata: args.metadata,
+    });
   },
 });
 
@@ -449,5 +499,48 @@ export const upsertAgentSession = mutation({
       messageCount:    args.messageCount ?? 0,
       metadata:        args.metadata,
     });
+  },
+});
+
+// Tenant-guarded message logging (recommended path)
+export const logMessageScoped = mutation({
+  args: {
+    tenantId: v.string(),
+    sessionId: v.id("sessions"),
+    agentId: v.optional(v.string()),
+    role: v.string(),
+    content: v.string(),
+    externalId: v.optional(v.string()),
+    tokenCount: v.optional(v.number()),
+    metadata: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    const tenantId = await requireTenant(ctx, args.tenantId);
+    const session = await ctx.db.get(args.sessionId);
+    if (!session) throw new Error("NOT_FOUND: session");
+    if (session.tenantId && session.tenantId !== tenantId) {
+      throw new Error("FORBIDDEN: session tenant mismatch");
+    }
+
+    const now = Date.now();
+    const id = await ctx.db.insert("messages", {
+      tenantId,
+      sessionId: args.sessionId,
+      agentId: args.agentId,
+      role: args.role,
+      content: args.content,
+      timestamp: now,
+      externalId: args.externalId,
+      tokenCount: args.tokenCount,
+      metadata: args.metadata,
+    });
+
+    await ctx.db.patch(args.sessionId, {
+      tenantId,
+      messageCount: (session.messageCount ?? 0) + 1,
+      lastActiveAt: now,
+    });
+
+    return id;
   },
 });

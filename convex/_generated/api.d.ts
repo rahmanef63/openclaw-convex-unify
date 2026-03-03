@@ -26,6 +26,7 @@ import type * as sessionSummaries from "../sessionSummaries.js";
 import type * as sessions from "../sessions.js";
 import type * as sync from "../sync.js";
 import type * as tenantCrud from "../tenantCrud.js";
+import type * as tenantGuard from "../tenantGuard.js";
 import type * as userIdentities from "../userIdentities.js";
 import type * as userProfiles from "../userProfiles.js";
 import type * as vectors from "../vectors.js";
@@ -56,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   sessions: typeof sessions;
   sync: typeof sync;
   tenantCrud: typeof tenantCrud;
+  tenantGuard: typeof tenantGuard;
   userIdentities: typeof userIdentities;
   userProfiles: typeof userProfiles;
   vectors: typeof vectors;

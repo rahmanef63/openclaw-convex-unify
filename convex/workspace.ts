@@ -2,6 +2,7 @@
 
 import { mutation, query, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requireTenant } from "./tenantGuard";
 
 async function findWorkspaceForPath(ctx: { db: any }, path: string) {
   const trees = await ctx.db.query("workspaceTrees").collect();
@@ -510,5 +511,74 @@ export const upsertWorkspaceLink = mutation({
       updatedAt: now,
     });
     return await ctx.db.get(id);
+  },
+});
+
+// Tenant-guarded workspace save/get (recommended path)
+export const saveFileScoped = mutation({
+  args: {
+    tenantId: v.string(),
+    path: v.string(),
+    fileType: v.string(),
+    category: v.string(),
+    content: v.string(),
+    ownerId: v.optional(v.id("userProfiles")),
+    agentId: v.optional(v.string()),
+    description: v.optional(v.string()),
+    tags: v.optional(v.array(v.string())),
+    isTemplate: v.optional(v.boolean()),
+    parsedData: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    const tenantId = await requireTenant(ctx, args.tenantId);
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("workspaceFiles")
+      .withIndex("by_path", (q) => q.eq("path", args.path))
+      .first();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        tenantId,
+        content: args.content,
+        parsedData: args.parsedData,
+        description: args.description,
+        tags: args.tags,
+        updatedAt: now,
+      });
+      return await ctx.db.get(existing._id);
+    }
+
+    const id = await ctx.db.insert("workspaceFiles", {
+      tenantId,
+      path: args.path,
+      fileType: args.fileType,
+      category: args.category,
+      ownerId: args.ownerId,
+      agentId: args.agentId,
+      content: args.content,
+      parsedData: args.parsedData,
+      description: args.description,
+      tags: args.tags,
+      isTemplate: args.isTemplate,
+      version: 1,
+      syncStatus: "synced",
+      lastSyncedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return await ctx.db.get(id);
+  },
+});
+
+export const getFileScoped = query({
+  args: { tenantId: v.string(), path: v.string(), ownerId: v.optional(v.id("userProfiles")), agentId: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    await requireTenant(ctx, args.tenantId);
+    const file = await ctx.db.query("workspaceFiles").withIndex("by_path", (q) => q.eq("path", args.path)).first();
+    if (!file || file.tenantId !== args.tenantId) return null;
+    if (args.ownerId && file.ownerId !== args.ownerId) return null;
+    if (args.agentId && file.agentId !== args.agentId) return null;
+    return file;
   },
 });

@@ -7,6 +7,7 @@
 
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireTenant } from "./tenantGuard";
 
 /** Simpan memory baru. */
 export const save = mutation({
@@ -168,5 +169,48 @@ export const remove = mutation({
   handler: async (ctx, args) => {
     await ctx.db.delete(args.id);
     return true;
+  },
+});
+
+// Tenant-guarded memory save (recommended path)
+export const saveScoped = mutation({
+  args: {
+    tenantId: v.string(),
+    agentId: v.string(),
+    userId: v.optional(v.id("userProfiles")),
+    category: v.string(),
+    key: v.string(),
+    value: v.string(),
+    context: v.optional(v.string()),
+    importance: v.optional(v.number()),
+    source: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const tenantId = await requireTenant(ctx, args.tenantId);
+    const now = Date.now();
+    const id = await ctx.db.insert("memories", {
+      ...args,
+      tenantId,
+      createdAt: now,
+      accessCount: 0,
+    });
+    return await ctx.db.get(id);
+  },
+});
+
+export const getByAgentScoped = query({
+  args: {
+    tenantId: v.string(),
+    agentId: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireTenant(ctx, args.tenantId);
+    const rows = await ctx.db
+      .query("memories")
+      .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
+      .order("desc")
+      .take(args.limit ?? 100);
+    return rows.filter((r) => r.tenantId === args.tenantId);
   },
 });
